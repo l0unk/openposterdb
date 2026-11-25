@@ -69,8 +69,8 @@ Every place where the fork edits a file upstream also has. These are the places 
 Line numbers are at `v1.3.0-louk.1` and drift; search for `louk-fork:`.
 
 To regenerate the list:
-`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (63 lines
-after the badge looks).
+`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (75 lines
+after the badge looks and preview art).
 
 Conflict risk on a sync: **low** = upstream's own line is untouched (the fork only added a line), so a
 conflict needs upstream to edit the same neighbourhood. **medium** = the hook replaces or wraps upstream
@@ -106,6 +106,7 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/badge.rs:218,376` | First line of `render_badges_uniform` and `render_vertical_badge`: fork looks are drawn by `louk::badge_looks`, upstream looks fall through unchanged. | low |
 | `api/src/image/generate.rs:359,443,632,732` | One line after `for_shape` in each `render_*_sync`: `badge_looks::collapse` turns the badge list into one average badge for the `a` look (borrows the list for every other look). | low |
 | `api/src/handlers/preview.rs:225,280,341,422` | The four preview handlers take spread sample scores for fork looks (`badge_looks::preview_samples`); upstream looks keep `sample_badges()`. Replaces 1 upstream line each. | low |
+| `api/src/handlers/preview.rs` (each of the four preview handlers) | `?art=` real artwork: one extra extractor argument (`PreviewArt`), one line splicing the `.art…` token into the preview cache key (`preview_art::keyed`), the sample-image line replaced by `preview_art::source` (sample without `art`, the title's TMDB image with it), and `&` added to the render call's first argument. | medium (4 lines per handler; upstream edits to the preview handlers will touch them) |
 | `web/src/components/RenderSettingsForm.vue:18` and 8 lines at 688-1211 | Imports `web/src/louk/badgeLooks.ts`; each of the four "Badge background" selects lists the fork looks (`v-for`) and shows a one-line description under the select when one is chosen. | low |
 | `.github/workflows/test.yml:7` | Runs on pushes to every branch, no `paths:` filter (upstream: `main` only, and only when `api/`, `web/` or the workflow change). | medium |
 | `.github/workflows/test.yml:20,37,58` | Three jobs pinned to `ubuntu-24.04`. `ubuntu-latest` is now 26.04 and Playwright 1.60 cannot install Chromium there. | medium. If upstream fixes this (new Playwright), take upstream's version and drop the pin. |
@@ -132,7 +133,8 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/backdrop_cap.rs` | All the cap logic (size plan, cache-key token, CDN hash, TMDB size) and its unit tests. |
 | `api/tests/louk_backdrop_cap.rs` | Route-level tests for the cap. |
 | `api/src/louk/badge_looks.rs`, `api/src/louk/badge_looks/tests.rs` | The three badge looks (drawing, score scale, average, preview samples) and their unit tests, including `louk_defaults_do_not_change_cache_keys`. |
-| `api/tests/louk_badge_looks.rs` | Route-level tests: preview endpoints, image query param, global and per-key settings. |
+| `api/src/louk/preview_art.rs` | `?art=` for the admin previews: parsing, cache token, TMDB fetch, JSON errors, unit tests. |
+| `api/tests/louk_badge_looks.rs` | Route-level tests: preview endpoints (including `?art=`), image query param, global and per-key settings. |
 | `web/src/louk/badgeLooks.ts`, `web/src/louk/__tests__/badgeLooks.spec.ts` | Names and one-line descriptions of the looks for the settings form, and their test. |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence, `badge-styles.md` (design notes for the badge looks). |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
@@ -288,7 +290,8 @@ setting, so nothing changes until you pick one. Design notes, colours and contra
 **Where to turn them on.** Admin → API keys → the key's settings (or Admin → Settings for every key
 that has no settings of its own) → in the **Poster**, **Logo**, **Backdrop (series/movie)** and
 **Episode** boxes → **Badge background**. The preview next to each box shows the look with sample
-scores in all three colours. A single image can also ask for one with `?badge_background=s` (or `m`,
+scores in all three colours. To judge a look on a real title, call the preview with
+`?art=movie-<tmdb id>` or `?art=series-<tmdb id>` (see `docs/api.md`, "Admin previews on real artwork"). A single image can also ask for one with `?badge_background=s` (or `m`,
 `a`). The deploy turns none of them on.
 
 **Recommendation for the AIOStreams app: Score colour (`s`) on posters and episode stills, One score
