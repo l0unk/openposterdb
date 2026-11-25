@@ -117,7 +117,15 @@ the title page (below).
   canonical `tmdb/movie-N`/`tmdb/series-N`, its imdb and tvdb ids, every alias in the title index
   (requested ids and the cross-id copies upstream writes) and every alias with cached renders of that
   kind; for stills only the ids of that episode. Pending index entries are flushed first, so an id
-  requested seconds ago is included. `preview_cache` is not touched: it only holds the settings
+  requested seconds ago is included. Because a render already in flight during the change (or its
+  cross-id copies) can still land after that purge, the same purge runs again 60 s later (one
+  pending job per title + kind, at most 256 pending; more are dropped with a warning). When an
+  override's image cannot be fetched or decoded, the automatic art is served and cached under the
+  same key, so a re-purge runs 10 minutes later, once per override version. The title page's
+  "Draw it now"/re-fetch purges a kind that has an override before drawing it. (A per-title
+  generation check before the cache write would need new hooks in upstream's write path
+  (`post_render_cache`, `spawn_cross_id_cache`); the fork does not add them; the P3.4 upstream PR
+  should.) `preview_cache` is not touched: it only holds the settings
   previews drawn from a bundled sample image, never title art. CDN copies cannot be purged from here
   (production has the CDN off).
 - **Uploads:** `POST /api/admin/louk/uploads` with the file as the raw body. PNG, JPEG or WebP by
@@ -125,7 +133,17 @@ the title page (below).
   8000 px per side (checked from the header before decoding), fully decoded under decoder limits.
   Stored as `db/uploads/<sha256>.<png|jpg|webp>`, written to a temp file and renamed; only 64-char hex
   names are ever used as paths. Served back only through the admin route
-  `/api/admin/louk/uploads/<sha256>`. Uploads are never deleted automatically.
+  `/api/admin/louk/uploads/<sha256>`. Uploads are never deleted automatically. Validation decodes
+  under a render permit with the poster path's limits (8192² RGBA); uploads with a side over 3840 px
+  also get a downscaled render copy `<sha256>.r.<png|jpg>`, so an 8000 px upload costs one full
+  decode at upload time instead of ~256 MB per render.
+- **Sources from TMDB or fanart.tv** are fully decoded once when downloaded and only then kept in the
+  base cache; a cached file whose header is no longer an image is deleted. An unusable source falls
+  back to the automatic art instead of failing the request.
+- **Sync cost:** `apply::render_poster`/`render_episode` mirror upstream's `generate_poster` call and
+  still render. After an upstream sync, compare them with `generate_poster_with_source` and
+  `generate_episode`: a new `ImageParams` field breaks the build (good), but new post-processing
+  upstream adds there would not reach override posters/stills.
 - **Where it lives:** table `louk_overrides` and `db/uploads/`, both inside `./db`, so Backrest backs
   them up. Code `api/src/louk/overrides/`; tests `api/tests/louk_overrides_{api,render}.rs`.
 - **Upstream PR seam:** only `overrides::purge::alias_targets` reads the title index

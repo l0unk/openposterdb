@@ -171,6 +171,8 @@ Setting, changing or clearing an override purges every cached render of that tit
 disk, in `image_meta`, and in the in-memory caches, under every id the title is known by (the
 canonical `tmdb/movie-N`/`tmdb/series-N`, the imdb/tvdb ids, every requested id and cross-id copy in
 the title index). CDN copies (`ENABLE_CDN_REDIRECTS`) cannot be purged from here.
+`POST /api/admin/louk/titles/{media_type}/{tmdb_id}/refetch` purges every cached render of a kind
+that has an override (any language) before drawing it again.
 
 ### `Override` object
 
@@ -211,27 +213,35 @@ The row stored under exactly this key (no language fallback). `200 {"override": 
 JSON body `{"source": "tmdb"|"fanart"|"upload"|"auto", "value": string, "fanart_id"?: string, "no_badges"?: bool}`
 (`value` may be omitted for `auto`; `no_badges` defaults to false). Validation: `tmdb` = `/name.ext`
 with `jpg`, `jpeg`, `png` or `webp` (no `.svg`); `fanart` = an `https://assets.fanart.tv/…` URL plus
-`fanart_id`; `upload` = the sha256 of an existing upload. Creates or replaces the row, then purges.
+`fanart_id` (`http://` fanart URLs are stored as `https://`); `upload` = the sha256 of an existing
+upload. Creates or replaces the row, then purges, and purges once more 60 s later (a render that
+was in flight during the change cannot leave the old art cached). `shadowed_by`: the rows that still
+win over this one for some request languages (for an any-language row every language row of the
+kind, for `pt` its `pt-BR`-style rows); empty when none. The response is
+`{"override": Override, "purge": PurgeResult, "shadowed_by": Override[]}`.
 
 ```json
-{"override": {"media_type": "tv", "tmdb_id": 60622, "kind": "logo", "season": null, "episode": null,
-              "lang": null, "source": "tmdb", "value": "/gdFFKKCDfubJVbj88JnaCHRJDGZ.png", "fanart_id": null,
+{"override": {"media_type": "tv", "tmdb_id": 62017, "kind": "logo", "season": null, "episode": null,
+              "lang": null, "source": "tmdb", "value": "/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png", "fanart_id": null,
               "no_badges": false, "updated_at": 1764060000,
-              "thumb_url": "https://image.tmdb.org/t/p/w300/gdFFKKCDfubJVbj88JnaCHRJDGZ.png"},
- "purge": {"ids": ["tmdb/series-60622", "imdb/tt1740299", "tvdb/295829"], "files_deleted": 3,
-           "meta_deleted": 3, "errors": [], "external_cache_only": false}}
+              "thumb_url": "https://image.tmdb.org/t/p/w300/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png"},
+ "purge": {"ids": ["tmdb/series-62017", "imdb/tt1740299", "tvdb/295829"], "files_deleted": 3,
+           "meta_deleted": 3, "errors": [], "external_cache_only": false},
+ "shadowed_by": []}
 ```
 
 ### `DELETE /api/admin/louk/overrides/{media_type}/{tmdb_id}/{kind}?season=&episode=&lang=`
 
-Removes the row and purges. `200 {"deleted": bool, "purge": PurgeResult | null}` (`purge` is null when
+Removes the row, purges, and purges once more 60 s later. `200 {"deleted": bool, "purge": PurgeResult | null}` (`purge` is null when
 there was no row).
 
 ### `POST /api/admin/louk/uploads`
 
 The request body **is the image file** (raw bytes, not multipart; any `Content-Type`, the format is
 read from the bytes). PNG, JPEG or WebP only, at most 15 MiB, at most 8000 px per side, and it must
-decode. Stored once per content under `DB_DIR/uploads/<sha256>.<png|jpg|webp>` (backed up with
+decode (decoder limits as on the poster path: 8192² RGBA). Uploads with a side over 3840 px also
+get a downscaled render copy (`<sha256>.r.<png|jpg>`) that renders decode instead of the original.
+Stored once per content under `DB_DIR/uploads/<sha256>.<png|jpg|webp>` (backed up with
 `./db`).
 
 - `200 {"sha256": string, "format": "png"|"jpeg"|"webp", "width": int, "height": int, "bytes": int, "created": bool, "url": "/api/admin/louk/uploads/<sha256>"}`
@@ -253,7 +263,9 @@ The stored file with its content type (`Cache-Control: private, max-age=31536000
 
 Every image the title could use: TMDB (all languages; for `episode` the episode's stills) and
 fanart.tv (posters, logos, backdrops). Calls TMDB and fanart.tv only. `lang` (default `en`) is the
-request language the automatic pick and `current` are computed for.
+request language the automatic pick and `current` are computed for. The automatic pick is computed
+from the same language-filtered, cached TMDB response and with upstream's own selection functions as
+the render path, so ties (e.g. several 0-vote logos) mark the image actually served.
 
 Order: TMDB first, then fanart; within each, the `lang` language, then language-less art, then
 English, then other languages A–Z; within a language by votes (fanart: likes) descending, and equal
@@ -279,14 +291,14 @@ of equals). `.svg` logos are left out (they cannot be drawn).
 candidate, `PUT` its `source`, `value` and `fanart_id`.
 
 ```json
-{"media_type": "tv", "tmdb_id": 60622, "kind": "logo", "season": null, "episode": null, "lang": "en",
+{"media_type": "tv", "tmdb_id": 62017, "kind": "logo", "season": null, "episode": null, "lang": "en",
  "current": null,
- "auto": {"source": "tmdb", "value": "/huev0mCSEtziNHhP32vcy7N2H2w.png", "fanart_id": null},
+ "auto": {"source": "tmdb", "value": "/ncPjZ213uIOYkIm1DPuBXK3V4Pv.png", "fanart_id": null},
  "candidates": [
-   {"source": "tmdb", "value": "/gdFFKKCDfubJVbj88JnaCHRJDGZ.png", "fanart_id": null, "lang": "en",
+   {"source": "tmdb", "value": "/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png", "fanart_id": null, "lang": "en",
     "votes": 3.334, "vote_count": 3, "likes": null, "width": 2505, "height": 1299,
-    "thumb_url": "https://image.tmdb.org/t/p/w300/gdFFKKCDfubJVbj88JnaCHRJDGZ.png",
-    "full_url": "https://image.tmdb.org/t/p/original/gdFFKKCDfubJVbj88JnaCHRJDGZ.png",
+    "thumb_url": "https://image.tmdb.org/t/p/w300/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png",
+    "full_url": "https://image.tmdb.org/t/p/original/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png",
     "auto": false, "current": false},
    {"source": "fanart", "value": "https://assets.fanart.tv/fanart/tv/295829/hdtvlogo/x.png", "fanart_id": "12345",
     "lang": "en", "votes": null, "vote_count": null, "likes": 4, "width": null, "height": null,
