@@ -307,12 +307,14 @@ listed in the P4.2 report).
 
 **Gallery.** [badges.html](badges.html) shows every look (`d` for comparison, `s`, `m`, `a`) on six real
 titles chosen to stress them (very dark, very bright, busy, animated, white top-right on the backdrop):
-a TV row of 240 x 360 cards on a 1920 px layout, a 412 px phone grid, backdrops as a 1280 x 720 hero
-under the app's shades (default column and the horizontal top-right row), episode stills and logos.
+a TV row of 240 x 360 cards on a 1920 px layout, a 412 px phone grid, backdrops as the Home hero
+under the app's shades at the TV size (1280 x 576; default column and the horizontal top-right row),
+episode stills and logos.
 Open the file in a browser; the images are in `badges/`. Re-render with `scripts/louk/gallery.py`
 against a local instance (see the header of that script); `scripts/louk/gallery-shots.js` takes
-screenshots of the page. The previews use sample ratings, so the `d` row shows upstream's sample values
-(10.0 and so on) next to the spread samples of the fork looks.
+screenshots of the page. The previews use the same sample ratings for every look, so the four are
+comparable. The app dims badges together with the picture under its hero shades, so a grey figure low in
+the hero column is the shade, not the render.
 
 Hooks: see the badge-look rows in "Divergence points in upstream files". Rollback: upstream reads a
 stored `s`, `m` or `a` as its default (`d`) and logs a warning; images keyed `.bgs`/`.bgm`/`.bga` are

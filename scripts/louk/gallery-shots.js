@@ -5,7 +5,7 @@
 //   nice -n 19 timeout 600 node scripts/louk/gallery-shots.js [out-dir] [raw-dir]
 //
 // Writes: tv-row-<look>.png (1920 wide), tv-1080-<n>.png (1920x1080 viewport cuts), phone-<look>.png
-// (412x915), hero-<title>-<col|row>-<look>.png (1280x720) and zoom-<title>-<look>.png (the bottom of
+// (412x915), hero-<title>-<col|row>-<look>.png (1280x576) and zoom-<title>-<look>.png (the bottom of
 // a 240x360 poster card, enlarged 3x with nearest-neighbour, from the raw server render in raw-dir).
 const path = require('path');
 const fs = require('fs');

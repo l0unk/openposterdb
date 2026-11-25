@@ -25,9 +25,9 @@ figure{margin:0}
 .pgrid{display:grid;grid-template-columns:repeat(3,124px);gap:8px 8px}
 .pgrid .c{width:124px;height:186px;border-radius:6px;overflow:hidden;background:#15151b}
 .pgrid img{display:block;width:100%;height:100%;object-fit:cover}
-/* Hero 1280x720 with the app's shades (safe-areas.md: side shade 1 -> .7 at 35 % -> 0; bottom shade
+/* Home hero as the app draws it on a 1280x720 TV: 1280 x 576 (--hero-height = max(36rem, 53vh)), with the app's shades (safe-areas.md: side shade 1 -> .7 at 35 % -> 0; bottom shade
    2/3 high, .6 in the middle, 1 at the bottom; image object-fit:cover, object-position:top). */
-.hero{position:relative;width:1280px;height:720px;overflow:hidden;background:#070707;margin:0 0 6px}
+.hero{position:relative;width:1280px;height:576px;overflow:hidden;background:#070707;margin:0 0 6px}
 .hero img.bd{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top}
 .hero .side{position:absolute;inset:0;background:linear-gradient(to right,rgba(7,7,7,1),rgba(7,7,7,.7) 35%,rgba(7,7,7,0))}
 .hero .bot{position:absolute;left:0;right:0;bottom:0;height:66.667%;background:linear-gradient(to top,rgba(7,7,7,1),rgba(7,7,7,.6),rgba(7,7,7,0))}
@@ -39,7 +39,7 @@ figure{margin:0}
 .heros>div{width:1280px}
 .mini{display:flex;flex-wrap:wrap;gap:18px}
 .mini figure{width:600px}
-.mini .h{position:relative;width:600px;height:337.5px;overflow:hidden;background:#070707}
+.mini .h{position:relative;width:600px;height:270px;overflow:hidden;background:#070707}
 .mini .h img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top}
 .mini .h .side{position:absolute;inset:0;background:linear-gradient(to right,rgba(7,7,7,1),rgba(7,7,7,.7) 35%,rgba(7,7,7,0))}
 .mini .h .bot{position:absolute;left:0;right:0;bottom:0;height:66.667%;background:linear-gradient(to top,rgba(7,7,7,1),rgba(7,7,7,.6),rgba(7,7,7,0))}
@@ -126,7 +126,7 @@ figure{margin:0}
 <div class="c"><img src="badges/breaking-bad-poster-a.jpg" alt="Breaking Bad"></div>
 </div></div>
 </div></section>
-<section id="backdrops"><h2>Backdrops as a 1280 x 720 hero</h2><p class="note">With the app's shades (left-to-right dark side shade, dark bottom shade; <code>safe-areas.md</code>). Rendered at 1920 px, shown at 1280 px (the TV viewport). Per look: the default right-edge column, and the horizontal top-right row (<code>badge_direction=h</code>) that the safe-areas doc recommends on TV. The disc look has no row: the two images are identical.</p>
+<section id="backdrops"><h2>Backdrops as the app's Home hero (1280 x 576)</h2><p class="note">With the app's shades (left-to-right dark side shade, dark bottom shade; <code>safe-areas.md</code>). The hero box is 1280 x 576 (36 rem, the height on a 1280 x 720 TV), image cover-fitted and top-aligned, so the bottom 144 px of the picture are cropped; the app dims the badges together with the picture, so a grey figure low in the column is the shade, not the render. On a title's own page the app removes both shades. Rendered at 1920 px, shown at 1280 px. Per look: the default right-edge column, and the horizontal top-right row (<code>badge_direction=h</code>) that the safe-areas doc recommends on TV. The disc look has no row: the two images are identical.</p>
 <div class="lookblock" id="bd-d"><div class="lab"><h3>Default</h3><small><code>badge_background=d</code></small></div><div class="heros">
 <div id="hero-kalki-col-d" data-look="d"><div class="hero"><img class="bd" src="badges/kalki-backdrop-col-d.jpg" alt=""><div class="side"></div><div class="bot"></div><div class="copy"><b>Kalki 2898-AD</b><i style="width:90%"></i><i style="width:70%"></i><u>Play</u></div></div><div class="hero-cap">Kalki 2898-AD &middot; Default, column (default)</div></div>
 <div id="hero-kalki-row-d" data-look="d"><div class="hero"><img class="bd" src="badges/kalki-backdrop-row-d.jpg" alt=""><div class="side"></div><div class="bot"></div><div class="copy"><b>Kalki 2898-AD</b><i style="width:90%"></i><i style="width:70%"></i><u>Play</u></div></div><div class="hero-cap">Kalki 2898-AD &middot; Default, row (badge_direction=h)</div></div>
