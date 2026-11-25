@@ -41,6 +41,8 @@ pub struct LoukState {
     pub tmdb_gate: tokio::sync::Mutex<Option<Instant>>,
     /// Hook entries dropped because a pending map was full.
     pub dropped: AtomicU64,
+    /// Per-title art overrides (in-memory mirror of `louk_overrides`).
+    pub overrides: crate::louk::overrides::store::OverrideStore,
 }
 
 impl LoukState {
@@ -51,6 +53,7 @@ impl LoukState {
             title_queue: tokio::sync::Notify::new(),
             tmdb_gate: tokio::sync::Mutex::new(None),
             dropped: AtomicU64::new(0),
+            overrides: crate::louk::overrides::store::OverrideStore::new(),
         }
     }
 }

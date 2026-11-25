@@ -43,6 +43,8 @@ pub const LOUK_SCHEMA_SQL: &[&str] = &[
         fetched_at   INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (show_tmdb_id, season, episode)
     )",
+    // Per-title art overrides (louk::overrides).
+    crate::louk::overrides::store::OVERRIDES_TABLE_SQL,
 ];
 
 /// Fork migrations `(sql, expected error substring)`, same contract as

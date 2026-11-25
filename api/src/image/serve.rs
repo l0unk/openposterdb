@@ -1445,7 +1445,7 @@ async fn resolve_tvdb_id(
 }
 
 /// Fetch all fanart images (cached) and return the appropriate list for the given kind.
-async fn fetch_fanart_images(
+pub(crate) async fn fetch_fanart_images( // louk-fork: pub(crate) for the override candidates
     fanart: &FanartClient,
     tmdb: &crate::services::tmdb::TmdbClient,
     cache: &moka::future::Cache<String, Arc<FanartImages>>,
