@@ -112,8 +112,8 @@
   "godfather-2/poster/-/s": {
    "file": "godfather-2-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=movie-240&badge_background=s",
-   "bytes": 42200,
-   "raw_bytes": 52199
+   "bytes": 42379,
+   "raw_bytes": 52249
   },
   "godfather-2/backdrop/col/s": {
    "file": "godfather-2-backdrop-col-s.jpg",
@@ -130,38 +130,38 @@
   "godfather-2/logo/-/s": {
    "file": "godfather-2-logo-s.png",
    "url": "/api/admin/preview/logo?art=movie-240&badge_background=s",
-   "bytes": 53547,
-   "raw_bytes": 97191
+   "bytes": 53972,
+   "raw_bytes": 95214
   },
   "godfather-2/poster/-/m": {
    "file": "godfather-2-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=movie-240&badge_background=m",
-   "bytes": 40502,
-   "raw_bytes": 49983
+   "bytes": 40458,
+   "raw_bytes": 49892
   },
   "godfather-2/backdrop/col/m": {
    "file": "godfather-2-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 48631,
-   "raw_bytes": 235121
+   "bytes": 48602,
+   "raw_bytes": 235243
   },
   "godfather-2/backdrop/row/m": {
    "file": "godfather-2-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
-   "bytes": 48591,
-   "raw_bytes": 235354
+   "bytes": 48551,
+   "raw_bytes": 235242
   },
   "godfather-2/logo/-/m": {
    "file": "godfather-2-logo-m.png",
    "url": "/api/admin/preview/logo?art=movie-240&badge_background=m",
-   "bytes": 52417,
-   "raw_bytes": 93883
+   "bytes": 51837,
+   "raw_bytes": 94242
   },
   "godfather-2/poster/-/a": {
    "file": "godfather-2-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=movie-240&badge_background=a",
-   "bytes": 36882,
-   "raw_bytes": 46380
+   "bytes": 37003,
+   "raw_bytes": 46498
   },
   "godfather-2/backdrop/col/a": {
    "file": "godfather-2-backdrop-col-a.jpg",
@@ -177,8 +177,8 @@
   "godfather-2/logo/-/a": {
    "file": "godfather-2-logo-a.png",
    "url": "/api/admin/preview/logo?art=movie-240&badge_background=a",
-   "bytes": 44696,
-   "raw_bytes": 75598
+   "bytes": 44880,
+   "raw_bytes": 76200
   },
   "kalki/poster/-/d": {
    "file": "kalki-poster-d.jpg",
@@ -207,8 +207,8 @@
   "kalki/poster/-/s": {
    "file": "kalki-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=movie-801688&badge_background=s",
-   "bytes": 73121,
-   "raw_bytes": 123131
+   "bytes": 73340,
+   "raw_bytes": 123185
   },
   "kalki/backdrop/col/s": {
    "file": "kalki-backdrop-col-s.jpg",
@@ -225,38 +225,38 @@
   "kalki/logo/-/s": {
    "file": "kalki-logo-s.png",
    "url": "/api/admin/preview/logo?art=movie-801688&badge_background=s",
-   "bytes": 34103,
-   "raw_bytes": 87536
+   "bytes": 34387,
+   "raw_bytes": 85560
   },
   "kalki/poster/-/m": {
    "file": "kalki-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=movie-801688&badge_background=m",
-   "bytes": 72120,
-   "raw_bytes": 121137
+   "bytes": 72105,
+   "raw_bytes": 121128
   },
   "kalki/backdrop/col/m": {
    "file": "kalki-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 46829,
-   "raw_bytes": 304468
+   "bytes": 46806,
+   "raw_bytes": 304500
   },
   "kalki/backdrop/row/m": {
    "file": "kalki-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
-   "bytes": 47001,
-   "raw_bytes": 305044
+   "bytes": 47031,
+   "raw_bytes": 305080
   },
   "kalki/logo/-/m": {
    "file": "kalki-logo-m.png",
    "url": "/api/admin/preview/logo?art=movie-801688&badge_background=m",
-   "bytes": 33272,
-   "raw_bytes": 84229
+   "bytes": 32538,
+   "raw_bytes": 84587
   },
   "kalki/poster/-/a": {
    "file": "kalki-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=movie-801688&badge_background=a",
-   "bytes": 69609,
-   "raw_bytes": 119142
+   "bytes": 69762,
+   "raw_bytes": 119182
   },
   "kalki/backdrop/col/a": {
    "file": "kalki-backdrop-col-a.jpg",
@@ -272,8 +272,8 @@
   "kalki/logo/-/a": {
    "file": "kalki-logo-a.png",
    "url": "/api/admin/preview/logo?art=movie-801688&badge_background=a",
-   "bytes": 25215,
-   "raw_bytes": 65944
+   "bytes": 25601,
+   "raw_bytes": 66546
   },
   "chainsaw-man/poster/-/d": {
    "file": "chainsaw-man-poster-d.jpg",
@@ -302,8 +302,8 @@
   "chainsaw-man/poster/-/s": {
    "file": "chainsaw-man-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=s",
-   "bytes": 68020,
-   "raw_bytes": 107560
+   "bytes": 68220,
+   "raw_bytes": 107592
   },
   "chainsaw-man/backdrop/col/s": {
    "file": "chainsaw-man-backdrop-col-s.jpg",
@@ -320,38 +320,38 @@
   "chainsaw-man/logo/-/s": {
    "file": "chainsaw-man-logo-s.png",
    "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=s",
-   "bytes": 36616,
-   "raw_bytes": 114409
+   "bytes": 36987,
+   "raw_bytes": 112433
   },
   "chainsaw-man/poster/-/m": {
    "file": "chainsaw-man-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=m",
-   "bytes": 67508,
-   "raw_bytes": 106159
+   "bytes": 67453,
+   "raw_bytes": 106084
   },
   "chainsaw-man/backdrop/col/m": {
    "file": "chainsaw-man-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 45279,
-   "raw_bytes": 155212
+   "bytes": 45094,
+   "raw_bytes": 155127
   },
   "chainsaw-man/backdrop/row/m": {
    "file": "chainsaw-man-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
-   "bytes": 46299,
-   "raw_bytes": 156567
+   "bytes": 46341,
+   "raw_bytes": 156557
   },
   "chainsaw-man/logo/-/m": {
    "file": "chainsaw-man-logo-m.png",
    "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=m",
-   "bytes": 35694,
-   "raw_bytes": 111101
+   "bytes": 35030,
+   "raw_bytes": 111460
   },
   "chainsaw-man/poster/-/a": {
    "file": "chainsaw-man-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=a",
-   "bytes": 67284,
-   "raw_bytes": 106601
+   "bytes": 67077,
+   "raw_bytes": 106360
   },
   "chainsaw-man/backdrop/col/a": {
    "file": "chainsaw-man-backdrop-col-a.jpg",
@@ -367,8 +367,8 @@
   "chainsaw-man/logo/-/a": {
    "file": "chainsaw-man-logo-a.png",
    "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=a",
-   "bytes": 27757,
-   "raw_bytes": 92817
+   "bytes": 27974,
+   "raw_bytes": 93419
   },
   "modern-family/poster/-/d": {
    "file": "modern-family-poster-d.jpg",
@@ -403,8 +403,8 @@
   "modern-family/poster/-/s": {
    "file": "modern-family-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=series-1421&badge_background=s",
-   "bytes": 72914,
-   "raw_bytes": 109867
+   "bytes": 73016,
+   "raw_bytes": 109837
   },
   "modern-family/backdrop/col/s": {
    "file": "modern-family-backdrop-col-s.jpg",
@@ -427,26 +427,26 @@
   "modern-family/logo/-/s": {
    "file": "modern-family-logo-s.png",
    "url": "/api/admin/preview/logo?art=series-1421&badge_background=s",
-   "bytes": 42902,
-   "raw_bytes": 113957
+   "bytes": 43390,
+   "raw_bytes": 111980
   },
   "modern-family/poster/-/m": {
    "file": "modern-family-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=series-1421&badge_background=m",
-   "bytes": 71733,
-   "raw_bytes": 107562
+   "bytes": 71763,
+   "raw_bytes": 107559
   },
   "modern-family/backdrop/col/m": {
    "file": "modern-family-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 53485,
-   "raw_bytes": 202334
+   "bytes": 53374,
+   "raw_bytes": 202503
   },
   "modern-family/backdrop/row/m": {
    "file": "modern-family-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
-   "bytes": 53549,
-   "raw_bytes": 201983
+   "bytes": 53575,
+   "raw_bytes": 202020
   },
   "modern-family/episode/-/m": {
    "file": "modern-family-episode-m.jpg",
@@ -457,14 +457,14 @@
   "modern-family/logo/-/m": {
    "file": "modern-family-logo-m.png",
    "url": "/api/admin/preview/logo?art=series-1421&badge_background=m",
-   "bytes": 42120,
-   "raw_bytes": 110649
+   "bytes": 41455,
+   "raw_bytes": 111008
   },
   "modern-family/poster/-/a": {
    "file": "modern-family-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=series-1421&badge_background=a",
-   "bytes": 68639,
-   "raw_bytes": 103770
+   "bytes": 68861,
+   "raw_bytes": 104022
   },
   "modern-family/backdrop/col/a": {
    "file": "modern-family-backdrop-col-a.jpg",
@@ -486,8 +486,8 @@
   "modern-family/logo/-/a": {
    "file": "modern-family-logo-a.png",
    "url": "/api/admin/preview/logo?art=series-1421&badge_background=a",
-   "bytes": 33863,
-   "raw_bytes": 92364
+   "bytes": 34063,
+   "raw_bytes": 92966
   },
   "arcane/poster/-/d": {
    "file": "arcane-poster-d.jpg",
@@ -522,8 +522,8 @@
   "arcane/poster/-/s": {
    "file": "arcane-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=series-94605&badge_background=s",
-   "bytes": 63953,
-   "raw_bytes": 97777
+   "bytes": 64134,
+   "raw_bytes": 97831
   },
   "arcane/backdrop/col/s": {
    "file": "arcane-backdrop-col-s.jpg",
@@ -546,26 +546,26 @@
   "arcane/logo/-/s": {
    "file": "arcane-logo-s.png",
    "url": "/api/admin/preview/logo?art=series-94605&badge_background=s",
-   "bytes": 59143,
-   "raw_bytes": 191831
+   "bytes": 59549,
+   "raw_bytes": 189855
   },
   "arcane/poster/-/m": {
    "file": "arcane-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=series-94605&badge_background=m",
-   "bytes": 62685,
-   "raw_bytes": 95555
+   "bytes": 62618,
+   "raw_bytes": 95516
   },
   "arcane/backdrop/col/m": {
    "file": "arcane-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 48305,
-   "raw_bytes": 283396
+   "bytes": 48294,
+   "raw_bytes": 283412
   },
   "arcane/backdrop/row/m": {
    "file": "arcane-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
-   "bytes": 54856,
-   "raw_bytes": 282963
+   "bytes": 54819,
+   "raw_bytes": 282767
   },
   "arcane/episode/-/m": {
    "file": "arcane-episode-m.jpg",
@@ -576,14 +576,14 @@
   "arcane/logo/-/m": {
    "file": "arcane-logo-m.png",
    "url": "/api/admin/preview/logo?art=series-94605&badge_background=m",
-   "bytes": 58241,
-   "raw_bytes": 188524
+   "bytes": 57632,
+   "raw_bytes": 188882
   },
   "arcane/poster/-/a": {
    "file": "arcane-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=series-94605&badge_background=a",
-   "bytes": 59699,
-   "raw_bytes": 92516
+   "bytes": 59909,
+   "raw_bytes": 92758
   },
   "arcane/backdrop/col/a": {
    "file": "arcane-backdrop-col-a.jpg",
@@ -605,8 +605,8 @@
   "arcane/logo/-/a": {
    "file": "arcane-logo-a.png",
    "url": "/api/admin/preview/logo?art=series-94605&badge_background=a",
-   "bytes": 50516,
-   "raw_bytes": 170239
+   "bytes": 50818,
+   "raw_bytes": 170841
   },
   "breaking-bad/poster/-/d": {
    "file": "breaking-bad-poster-d.jpg",
@@ -641,8 +641,8 @@
   "breaking-bad/poster/-/s": {
    "file": "breaking-bad-poster-s.jpg",
    "url": "/api/admin/preview/poster?art=series-1396&badge_background=s",
-   "bytes": 62772,
-   "raw_bytes": 147581
+   "bytes": 62906,
+   "raw_bytes": 147663
   },
   "breaking-bad/backdrop/col/s": {
    "file": "breaking-bad-backdrop-col-s.jpg",
@@ -665,26 +665,26 @@
   "breaking-bad/logo/-/s": {
    "file": "breaking-bad-logo-s.png",
    "url": "/api/admin/preview/logo?art=series-1396&badge_background=s",
-   "bytes": 53615,
-   "raw_bytes": 167331
+   "bytes": 54153,
+   "raw_bytes": 165355
   },
   "breaking-bad/poster/-/m": {
    "file": "breaking-bad-poster-m.jpg",
    "url": "/api/admin/preview/poster?art=series-1396&badge_background=m",
-   "bytes": 61906,
-   "raw_bytes": 145271
+   "bytes": 61893,
+   "raw_bytes": 145230
   },
   "breaking-bad/backdrop/col/m": {
    "file": "breaking-bad-backdrop-col-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=m&imageSize=medium&position=tr",
-   "bytes": 76793,
-   "raw_bytes": 439997
+   "bytes": 76602,
+   "raw_bytes": 439621
   },
   "breaking-bad/backdrop/row/m": {
    "file": "breaking-bad-backdrop-row-m.jpg",
    "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
    "bytes": 76967,
-   "raw_bytes": 441714
+   "raw_bytes": 441727
   },
   "breaking-bad/episode/-/m": {
    "file": "breaking-bad-episode-m.jpg",
@@ -695,14 +695,14 @@
   "breaking-bad/logo/-/m": {
    "file": "breaking-bad-logo-m.png",
    "url": "/api/admin/preview/logo?art=series-1396&badge_background=m",
-   "bytes": 52941,
-   "raw_bytes": 164023
+   "bytes": 52251,
+   "raw_bytes": 164382
   },
   "breaking-bad/poster/-/a": {
    "file": "breaking-bad-poster-a.jpg",
    "url": "/api/admin/preview/poster?art=series-1396&badge_background=a",
-   "bytes": 59833,
-   "raw_bytes": 141957
+   "bytes": 59983,
+   "raw_bytes": 142243
   },
   "breaking-bad/backdrop/col/a": {
    "file": "breaking-bad-backdrop-col-a.jpg",
@@ -724,8 +724,8 @@
   "breaking-bad/logo/-/a": {
    "file": "breaking-bad-logo-a.png",
    "url": "/api/admin/preview/logo?art=series-1396&badge_background=a",
-   "bytes": 44515,
-   "raw_bytes": 145738
+   "bytes": 44725,
+   "raw_bytes": 146341
   }
  }
 }
