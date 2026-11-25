@@ -176,8 +176,8 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/lib.rs:8` | `pub mod louk;` declares the fork module root. | low |
 | `api/src/lib.rs:69` | `AppState` gets one field `louk: Arc<LoukState>` (title index pending maps, TMDB pacing). | low |
 | `api/src/main.rs:161` | Runs the fork schema (`louk::schema::apply`) right after upstream's `MIGRATIONS` loop. | low |
-| `api/src/main.rs:341` | `louk` in the `AppState` literal. | low |
-| `api/src/main.rs:365` | Starts the title index workers (`louk::titles::spawn_workers`) after the `last_used_at` flush task. | low |
+| `api/src/main.rs:342` | `louk` in the `AppState` literal. | low |
+| `api/src/main.rs:366` | Starts the title index workers (`louk::titles::spawn_workers`) after the `last_used_at` flush task. | low |
 | `api/src/routes/admin.rs:35` | Merges `louk::routes::louk_admin_routes()` into `admin_routes()`, so the fork routes get admin auth. | low |
 | `api/src/handlers/admin.rs:600` | `purge_title` made `pub(crate)` so the title purge reuses it. | low (same line as upstream's signature) |
 | `api/src/config.rs:24` | `Config` gets one field `louk: LoukConfig`, which carries all fork settings. | low |
@@ -191,24 +191,24 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/serve.rs:449` | First line of `resolve_with_ratings`: `RATINGS_DISABLED` forces `skip_ratings` on every path. | low |
 | `api/src/image/serve.rs:452` | `resolve_with_ratings`, after `id::resolve`: `louk::titles::note_resolved` notes the id and what it resolved to (before the episode uplift, so episode ids keep season/episode). In-memory only. | low |
 | `api/src/image/serve.rs:460` | Inside the episode uplift: `note_cross_ids` notes the show ids upstream also caches the render under. | low |
-| `api/src/image/serve.rs:713` | `handle_inner` (posters), after `validate_id_value`: `louk::titles::touch` notes the request time. In-memory only. | low |
-| `api/src/image/serve.rs:1706` | `handle_episode_inner`: same `touch`. | low |
-| `api/src/image/serve.rs:1824` | `handle_logo_backdrop_inner`: same `touch`. | low |
-| `api/src/image/serve.rs:1208` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
-| `api/src/image/serve.rs:1649` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
-| `api/src/image/serve.rs:1880` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
-| `api/src/image/serve.rs:1919` | Slow path of the same function: same added line. | low |
-| `api/src/image/serve.rs:2058` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
-| `api/src/image/serve.rs:718` | `handle_inner`, before the fast path: `overrides::apply::badge_limit_hint` sets the poster ratings limit to 0 for a "no badges" override (only when such a row exists, and only from `id_cache`). | low |
-| `api/src/image/serve.rs:791,792` | `handle_inner`, after `resolve_with_ratings`: the same with the resolved title (`badge_limit`), and `use_fanart` is shadowed to false when an override replaces the art, so the fanart branch is skipped. | low |
-| `api/src/image/serve.rs:1159` | `trigger_logo_backdrop_refresh`: `strip_badges` after the badges are computed (the refresh gets the unmodified settings). | low |
-| `api/src/image/serve.rs:1166,1167` | `trigger_logo_backdrop_refresh`: `source_bytes` of the override; the `if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { b } else if fanart_is_primary`. | medium (edits an upstream line) |
-| `api/src/image/serve.rs:1231` | First line of `generate_episode`: `render_episode` draws the still from the override and returns early. | low |
-| `api/src/image/serve.rs:1327` | First line of `generate_poster_with_source`: `render_poster` draws the poster from the override and returns early (before the TMDB-vs-fanart chain and the "no poster_path" error). | low |
-| `api/src/image/serve.rs:1455` | `fetch_fanart_images` made `pub(crate)` for the override candidates. | low (same line as upstream's signature) |
-| `api/src/image/serve.rs:1711,1761` | `handle_episode_inner`: `badge_limit_hint` before the fast path, `badge_limit` after the episode check. | low |
-| `api/src/image/serve.rs:1833,1904` | `handle_logo_backdrop_inner`: the same two lines, shadowing `type_ratings_limit`. | low |
-| `api/src/image/serve.rs:2000,2001` | Logo/backdrop generation closure: `source_bytes`; the `let (primary, fallback) = if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { (Some(b), None) } else if fanart_is_primary`. | medium (edits an upstream line) |
+| `api/src/image/serve.rs:714` | `handle_inner` (posters), after `validate_id_value`: `louk::titles::touch` notes the request time. In-memory only. | low |
+| `api/src/image/serve.rs:1709` | `handle_episode_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1829` | `handle_logo_backdrop_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1211` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:1652` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
+| `api/src/image/serve.rs:1886` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
+| `api/src/image/serve.rs:1926` | Slow path of the same function: same added line. | low |
+| `api/src/image/serve.rs:2065` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:719` | `handle_inner`, before the fast path: `overrides::apply::badge_limit_hint` sets the poster ratings limit to 0 for a "no badges" override (only when such a row exists, and only from `id_cache`). | low |
+| `api/src/image/serve.rs:794,795` | `handle_inner`, after `resolve_with_ratings`: the same with the resolved title (`badge_limit`), and `use_fanart` is shadowed to false when an override replaces the art, so the fanart branch is skipped. | low |
+| `api/src/image/serve.rs:1162` | `trigger_logo_backdrop_refresh`: `strip_badges` after the badges are computed (the refresh gets the unmodified settings). | low |
+| `api/src/image/serve.rs:1169,1170` | `trigger_logo_backdrop_refresh`: `source_bytes` of the override; the `if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { b } else if fanart_is_primary`. | medium (edits an upstream line) |
+| `api/src/image/serve.rs:1234` | First line of `generate_episode`: `render_episode` draws the still from the override and returns early. | low |
+| `api/src/image/serve.rs:1330` | First line of `generate_poster_with_source`: `render_poster` draws the poster from the override and returns early (before the TMDB-vs-fanart chain and the "no poster_path" error). | low |
+| `api/src/image/serve.rs:1458` | `fetch_fanart_images` made `pub(crate)` for the override candidates. | low (same line as upstream's signature) |
+| `api/src/image/serve.rs:1714,1766` | `handle_episode_inner`: `badge_limit_hint` before the fast path, `badge_limit` after the episode check. | low |
+| `api/src/image/serve.rs:1838,1911` | `handle_logo_backdrop_inner`: the same two lines, shadowing `type_ratings_limit`. | low |
+| `api/src/image/serve.rs:2007,2008` | Logo/backdrop generation closure: `source_bytes`; the `let (primary, fallback) = if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { (Some(b), None) } else if fanart_is_primary`. | medium (edits an upstream line) |
 | `api/src/routes/app.rs:140,146` | `image_routes()` (and `cdn_routes()`) are wrapped in `louk::http_cache::layer`, which adds the `ETag`/304 middleware unless `LOUK_HTTP_ETAG=false`. | low |
 | `api/src/main.rs:228` | The `image_mem_cache` weigher calls `louk::http_cache::note_insert`, which hashes a newly inserted image once and remembers its tag. | low |
 | `api/src/image/serve.rs:664` | `check_caches`, memory-hit branch: `louk::http_cache::note_key` tells the ETag layer which entry the request serves. | low |
@@ -220,9 +220,9 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
 | `api/tests/common/mod.rs:22,35` | `TestAppOptions` gets a `louk` field and its default. | low |
 | `api/tests/common/mod.rs:48,52,55` | `_setup_test_app` takes one extra argument `louk`; two callers pass it. These are long upstream lines edited in place. | medium |
-| `api/tests/common/mod.rs:136` | `louk` in the test `Config` literal. | low |
+| `api/tests/common/mod.rs:137` | `louk` in the test `Config` literal. | low |
 | `api/tests/common/mod.rs:79` | Runs the fork schema after upstream's `MIGRATIONS` loop. | low |
-| `api/tests/common/mod.rs:193` | `louk` in the test `AppState` literal. | low |
+| `api/tests/common/mod.rs:194` | `louk` in the test `AppState` literal. | low |
 | `web/src/router/index.ts:112-131` | Three child routes of `/admin` (`library`, `library/alias/:idType/:idValue`, `library/:mediaType/:tmdbId`) between a `louk-fork:` and a `louk-fork: end` comment. Pure insertion. | low |
 | `web/src/components/AppSidebar.vue:27` | The "Library" item of the sidebar list; the `lucide-vue-next` import on line 5 also gets `Library` (no marker). | low |
 | `web/src/components/AppSidebar.vue:37` | `isActive` keeps "Library" highlighted on title pages. Rewrites upstream's `return route.path === path`. | medium |
