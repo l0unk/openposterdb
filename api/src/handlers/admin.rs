@@ -597,7 +597,7 @@ pub struct PurgeQuery {
 /// (`image_meta` + the shared `available_ratings` index), and the in-memory
 /// moka caches (`image_mem_cache` by prefix, plus the exact-keyed `id_cache`
 /// and `available_ratings_cache`).
-async fn purge_title(
+pub(crate) async fn purge_title( // louk-fork: pub(crate) for the title dashboard purge
     state: &AppState,
     image_type: cache::ImageType,
     id_type: &str,

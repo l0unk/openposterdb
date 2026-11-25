@@ -449,6 +449,7 @@ async fn resolve_with_ratings(
     let skip_ratings = crate::louk::config::effective_skip_ratings(&state.config.louk, skip_ratings); // louk-fork:
     let id_resolve_start = Instant::now();
     let mut resolved = id::resolve(id_type, id_value, &state.tmdb, &state.id_cache).await?;
+    crate::louk::titles::note_resolved(state, id_type.as_str(), id_value, &resolved); // louk-fork:
 
     // When an episode ID hits a non-episode endpoint, re-resolve to the
     // parent series so ratings and assets are series-level.
@@ -456,6 +457,7 @@ async fn resolve_with_ratings(
         if let Some(ref ep) = resolved.episode {
             let series_id = id::format_tmdb_id_value(ep.show_tmdb_id, &MediaType::Tv, None);
             resolved = id::resolve(IdType::Tmdb, &series_id, &state.tmdb, &state.id_cache).await?;
+            crate::louk::titles::note_cross_ids(state, id_type.as_str(), &resolved); // louk-fork:
         }
     }
 
@@ -708,6 +710,7 @@ pub async fn handle_inner(
 
     // Reject path traversal, null bytes, etc. before any network calls
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
 
     // Resolve "default" badge direction and style early, before cache key construction
     settings.poster_badge_direction = settings.poster_badge_direction.resolve(settings.poster_position);
@@ -1693,6 +1696,7 @@ pub async fn handle_episode_inner(
     let id_type = id::IdType::parse(id_type_str)?;
     let id_value = id_value_jpg.strip_suffix(".jpg").unwrap_or(id_value_jpg);
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
 
     // Resolve episode-specific defaults
     settings.episode_badge_direction = settings.episode_badge_direction.resolve(settings.episode_position);
@@ -1808,6 +1812,7 @@ pub async fn handle_logo_backdrop_inner(
     let id_type = IdType::parse(id_type_str)?;
     let id_value = kind.strip_ext(id_value_raw);
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
     let kind_prefix = kind.kind_prefix();
     let label = kind.label();
 

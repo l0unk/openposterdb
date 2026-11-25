@@ -158,6 +158,7 @@ async fn main() {
             Err(e) => panic!("migration failed: {e}\n  SQL: {sql}"),
         }
     }
+    openposterdb_api::louk::schema::apply(&database).await.expect("fork schema failed"); // louk-fork:
 
     // Run data upgrades (cache key migrations, etc.)
     upgrade::run(&database, &config.cache_dir, config.external_cache_only)
@@ -337,6 +338,7 @@ async fn main() {
         cross_id_semaphore,
         settings_hash_registry,
         available_ratings_cache,
+        louk: Arc::new(openposterdb_api::louk::state::LoukState::new()), // louk-fork:
         config: config.clone(),
     });
 
@@ -359,6 +361,8 @@ async fn main() {
             }
         });
     }
+
+    openposterdb_api::louk::titles::spawn_workers(state.clone()); // louk-fork:
 
     let app = build_app(state.clone());
 

@@ -3,3 +3,8 @@
 
 pub mod backdrop_cap;
 pub mod config;
+pub mod handlers;
+pub mod routes;
+pub mod schema;
+pub mod state;
+pub mod titles;
