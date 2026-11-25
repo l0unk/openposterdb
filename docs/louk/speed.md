@@ -228,3 +228,32 @@ every request; the per-key+IP limiter (240 burst, then 5/s) sees AIOMetadata as 
   `POSTER_CACHE_PROVIDER_POLICIES=[{"domain":"openposterdb","policy":"infer"}]` is set too. Revisit if
   429s or restarts show up in AIOMetadata's fallbacks.
 - With BUILD 2: `LOUK_RATINGS_SWR=true` in `openposterdb/compose.yaml`.
+
+## Built
+
+### ETag and 304 (`LOUK_HTTP_ETAG`, on by default)
+
+What changed from the design above: the tag is **not** hashed per response. It is computed once when an
+image enters the memory cache (the cache's weigher calls `louk::http_cache::note_insert`; re-inserting
+the same buffer every 60 s reuses the tag) and kept in a side map of tags only (no image bytes, 50 000
+entries, 2 h). Every served image passes through the memory cache (a hit notes its key in
+`check_caches`, a disk load or a render inserts it), and the layer adds the tag only when the response
+body, the current memory-cache entry and the remembered tag are the same buffer. Anything else (a race,
+an evicted tag) gets no `ETag`, never a wrong one. Cost: one SHA-256 per insert (≈ 0.05–0.3 ms with
+SHA-NI) and one map lookup per response.
+
+- **Strong** tag (`"<32 hex>"`): it names the exact bytes; images are never compressed or transformed
+  on the way out, so byte-identical is the right promise. `If-None-Match` uses the weak comparison the
+  RFC prescribes, so `W/"…"` from a client still matches.
+- 304: no body, same `ETag`, `Cache-Control` and `Vary` as the 200, no `Content-Type`,
+  `Content-Length` = the 200's length. Errors, redirects and rate-limit answers are untouched.
+- `Cache-Control` is unchanged (`public, max-age=3600, stale-while-revalidate=86400`).
+
+How to see it (any image URL; through AIOMetadata the same works with its `/poster-cache/proxy/…` URL,
+because its pass-through forwards `If-None-Match` and relays the 304):
+
+```sh
+U='http://openposterdb:3000/<key>/tmdb/backdrop-default/movie-1368337.jpg?imageSize=large'
+E=$(curl -sI "$U" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')
+curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -H "If-None-Match: $E" "$U"   # 304 0
+```

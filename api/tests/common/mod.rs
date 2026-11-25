@@ -102,6 +102,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
         .build();
     let image_mem_cache = moka::future::Cache::builder()
         .max_capacity(1024 * 1024)
+        .weigher(|k: &String, v: &openposterdb_api::cache::MemCacheEntry| -> u32 { openposterdb_api::louk::http_cache::note_insert(k, v); 1 }) // louk-fork: as main.rs
         .time_to_live(Duration::from_secs(3600))
         // Mirror the production builder so per-title purge tests can exercise
         // `invalidate_entries_if` (see api/src/main.rs).

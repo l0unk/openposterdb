@@ -225,6 +225,7 @@ async fn main() {
 
     let image_mem_cache = moka::future::Cache::builder()
         .weigher(|_key: &String, value: &MemCacheEntry| -> u32 {
+            openposterdb_api::louk::http_cache::note_insert(_key, value); // louk-fork: ETag once per insert
             // Images are typically 50-500KB, well within u32 range
             u32::try_from(value.bytes.len()).unwrap_or(u32::MAX).saturating_add(64)
         })

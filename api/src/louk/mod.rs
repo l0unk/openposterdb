@@ -4,6 +4,7 @@
 pub mod backdrop_cap;
 pub mod config;
 pub mod handlers;
+pub mod http_cache;
 pub mod overrides;
 pub mod routes;
 pub mod schema;

@@ -159,7 +159,7 @@ mod tests {
             "EXTERNAL_CACHE_ONLY",
             "FREE_KEY_ENABLED",
             "DISABLE_PUBLIC_PAGES",
-            "RATINGS_DISABLED", "BACKDROP_MAX_WIDTH", // louk-fork:
+            "RATINGS_DISABLED", "BACKDROP_MAX_WIDTH", "LOUK_HTTP_ETAG", "LOUK_RATINGS_SWR", // louk-fork:
         ] {
             unsafe { env::remove_var(key) };
         }

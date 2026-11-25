@@ -32,6 +32,7 @@ Two settings, the title dashboard (backend and admin pages), a load harness and 
 | --- | --- | --- | --- |
 | `BACKDROP_MAX_WIDTH` | Caps how wide `large` and `very-large` backdrops are drawn. A 3840 px backdrop uses about 4 times the memory of a 1920 px one, and many TMDB originals are only 1920 px wide and were being stretched. Badges scale with the picture. Posters, logos, episode stills and the `small`/`medium` backdrops are not touched. | Set the env var to a number from 320 to 3840, e.g. `BACKDROP_MAX_WIDTH=1920`. | Unset = exactly upstream. A bad value (e.g. `1920px`) is ignored with a warning, so you get upstream's 3840 again. |
 | `RATINGS_DISABLED` | For dev and test only. No rating lookups at all, no badges, and the server starts without any rating provider. It guarantees a local instance or a load test can never call MDBList or OMDb. | `RATINGS_DISABLED=true`. A typo stops the server at startup instead of silently spending quota. | Off. **Never set it in production.** |
+| `LOUK_HTTP_ETAG` (speed) | Image responses get an `ETag`, and a client that already has the image gets a `304` with no body instead of the whole picture again. AIOMetadata's art proxy already passes `If-None-Match` and 304s through, so clients revalidate their hourly copies for a few hundred bytes instead of 68-475 KB. See `docs/louk/speed.md`. | On by default (it only adds a header; the image and every other header stay the same). `LOUK_HTTP_ETAG=false` turns it off. | On. |
 | Load harness | Scripts to start a local instance and fire a catalog-sized burst (150 titles x poster, backdrop, logo, plus 40 episode stills) while recording peak memory and latency. Meant to measure memory. | `scripts/louk/README.md`. | Not part of the image. |
 | Backdrop safe-area notes | Where the AIOStreams app crops and darkens backdrops, and which existing settings keep ratings visible. No code. | See "Backdrop safe areas" below. | Nothing changes by itself. |
 
@@ -182,7 +183,7 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/config.rs:49` | `Debug` impl prints that field. | low |
 | `api/src/config.rs:114` | `from_env` fills the field (`LoukConfig::from_env()`). | low |
 | `api/src/config.rs:116` | One early-return line: with `RATINGS_DISABLED` it drops the OMDb/MDBList/Trakt keys and returns before upstream's "need one ratings source" panic. | medium (sits just above upstream's check) |
-| `api/src/config.rs:162` | Two names added to the test helper `clear_config_env`. | low |
+| `api/src/config.rs:162` | Four names added to the test helper `clear_config_env`. | low |
 | `api/src/config.rs:326` | Marker comment for the fork's `RATINGS_DISABLED` unit tests, appended at the end of `mod tests`. | low (end of file) |
 | `api/src/image/serve.rs:397` | First line of `read_available_ratings_cached`: with `RATINGS_DISABLED`, never build fast-path keys from rating sources an enabled run recorded. | low |
 | `api/src/image/serve.rs:420` | First line of `upsert_available_ratings_cached`: with `RATINGS_DISABLED`, do not overwrite the `available_ratings` index with an empty list. | low |
@@ -207,6 +208,10 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/serve.rs:1711,1761` | `handle_episode_inner`: `badge_limit_hint` before the fast path, `badge_limit` after the episode check. | low |
 | `api/src/image/serve.rs:1833,1904` | `handle_logo_backdrop_inner`: the same two lines, shadowing `type_ratings_limit`. | low |
 | `api/src/image/serve.rs:2000,2001` | Logo/backdrop generation closure: `source_bytes`; the `let (primary, fallback) = if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { (Some(b), None) } else if fanart_is_primary`. | medium (edits an upstream line) |
+| `api/src/routes/app.rs:140,146` | `image_routes()` (and `cdn_routes()`) are wrapped in `louk::http_cache::layer`, which adds the `ETag`/304 middleware unless `LOUK_HTTP_ETAG=false`. | low |
+| `api/src/main.rs:228` | The `image_mem_cache` weigher calls `louk::http_cache::note_insert`, which hashes a newly inserted image once and remembers its tag. | low |
+| `api/src/image/serve.rs:664` | `check_caches`, memory-hit branch: `louk::http_cache::note_key` tells the ETag layer which entry the request serves. | low |
+| `api/tests/common/mod.rs:105` | The test `image_mem_cache` gets the same weigher hook (weight 1, so capacity is unchanged). | low |
 | `api/src/handlers/image.rs:528` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
 | `api/src/handlers/preview.rs:306` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
 | `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
@@ -239,7 +244,8 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | Path | What |
 | --- | --- |
 | `api/src/louk/mod.rs` | Fork module root. |
-| `api/src/louk/config.rs` | `LoukConfig`, reads `RATINGS_DISABLED` and `BACKDROP_MAX_WIDTH`. |
+| `api/src/louk/config.rs` | `LoukConfig`, reads `RATINGS_DISABLED`, `BACKDROP_MAX_WIDTH`, `LOUK_HTTP_ETAG` and `LOUK_RATINGS_SWR`. |
+| `api/src/louk/http_cache.rs` | `ETag`/304 middleware for image routes, the weigher and `check_caches` hooks, tag side map (tags only, no bytes). |
 | `api/src/louk/backdrop_cap.rs` | All the cap logic (size plan, cache-key token, CDN hash, TMDB size) and its unit tests. |
 | `api/tests/louk_backdrop_cap.rs` | Route-level tests for the cap. |
 | `api/src/louk/schema.rs` | Fork tables (`louk_titles`, `louk_title_aliases`, `louk_episodes`), additive only. |
@@ -253,6 +259,7 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `web/src/__tests__/louk/**` | Unit tests of the above (api, Library, title page, the ImageListView link). |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
+| `api/tests/louk_http_cache.rs` | Route tests for the ETag layer. |
 
 ### Workflow differences
 

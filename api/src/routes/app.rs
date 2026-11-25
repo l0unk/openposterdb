@@ -137,13 +137,13 @@ pub fn build_app(state: Arc<AppState>) -> Router {
         .layer(CompressionLayer::new());
 
     let mut app = Router::new()
-        .merge(super::image::image_routes())
+        .merge(crate::louk::http_cache::layer(super::image::image_routes(), &state)) // louk-fork: ETag/304
         .merge(super::image::is_valid_route());
 
     // Content-addressed CDN routes — only registered when ENABLE_CDN_REDIRECTS is set,
     // since nothing populates the settings_hash_registry otherwise.
     if state.config.enable_cdn_redirects {
-        app = app.merge(super::image::cdn_routes());
+        app = app.merge(crate::louk::http_cache::layer(super::image::cdn_routes(), &state)); // louk-fork: ETag/304
     }
 
     let mut app = app

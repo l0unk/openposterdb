@@ -661,6 +661,7 @@ async fn check_caches(
                 )
                 .await;
         }
+        crate::louk::http_cache::note_key(cache_key); // louk-fork: ETag for this memory hit
         return Ok(Some(entry.bytes.clone()));
     }
 
