@@ -143,6 +143,7 @@ async fn global_and_per_key_settings_store_fork_looks() {
     let token = common::setup_admin(&app).await;
 
     let update = json!({
+        "image_source": "t",
         "poster_badge_background": "s",
         "logo_badge_background": "m",
         "backdrop_badge_background": "a",
@@ -180,7 +181,7 @@ async fn global_and_per_key_settings_store_fork_looks() {
     let key_id = serde_json::from_slice::<Value>(&body).unwrap()["id"]
         .as_i64()
         .unwrap();
-    let update = json!({ "poster_badge_background": "m", "backdrop_badge_background": "s" });
+    let update = json!({ "image_source": "t", "poster_badge_background": "m", "backdrop_badge_background": "s" });
     let res = app
         .clone()
         .oneshot(authed(
@@ -208,7 +209,7 @@ async fn global_and_per_key_settings_store_fork_looks() {
     assert_eq!(got["backdrop_badge_background"], "s");
 
     // Unknown values are refused, as upstream does for any bad token.
-    let bad = json!({ "poster_badge_background": "g" });
+    let bad = json!({ "image_source": "t", "poster_badge_background": "g" });
     let res = app
         .clone()
         .oneshot(authed("PUT", "/api/admin/settings", &token, Some(bad)))
