@@ -68,7 +68,7 @@ fn optional_secret(key: &str) -> Option<String> {
 
 impl Config {
     pub fn from_env() -> Self {
-        let mut config = Self {
+        let config = Self {
             tmdb_api_key: env::var("TMDB_API_KEY").expect("TMDB_API_KEY must be set"),
             omdb_api_key: optional_secret("OMDB_API_KEY"),
             cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".into()),
@@ -111,15 +111,9 @@ impl Config {
             disable_public_pages: env::var("DISABLE_PUBLIC_PAGES")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
-            louk: crate::louk::config::LoukConfig::from_env(), // louk-fork: RATINGS_DISABLED never builds the rationed clients and skips the provider check
+            louk: crate::louk::config::LoukConfig::from_env(), // louk-fork:
         };
-        if config.louk.ratings_disabled {
-            config.omdb_api_key = None;
-            config.mdblist_api_key = None;
-            config.trakt_client_id = None;
-            tracing::warn!("RATINGS_DISABLED=true: no rating lookups; images render without badges");
-            return config;
-        }
+        if config.louk.ratings_disabled { return crate::louk::config::without_rating_keys(config); } // louk-fork:
 
         if config.omdb_api_key.is_none()
             && config.mdblist_api_key.is_none()
@@ -364,6 +358,18 @@ mod tests {
         unsafe { env::set_var("TMDB_API_KEY", "t") };
         unsafe { env::set_var("RATINGS_DISABLED", "false") };
         assert!(std::panic::catch_unwind(Config::from_env).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn ratings_disabled_typo_panics_instead_of_failing_open() {
+        unsafe { clear_config_env() };
+        for (k, v) in [("TMDB_API_KEY", "t"), ("OMDB_API_KEY", "o"), ("RATINGS_DISABLED", "ture")] {
+            unsafe { env::set_var(k, v) };
+        }
+        assert!(std::panic::catch_unwind(Config::from_env).is_err());
+        unsafe { env::set_var("RATINGS_DISABLED", " YES ") };
+        assert!(Config::from_env().omdb_api_key.is_none());
     }
 
     #[test]

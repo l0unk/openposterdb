@@ -394,6 +394,7 @@ pub fn cdn_image_response(bytes: Bytes, max_age: u64, content_type: &'static str
 /// Read available rating sources for a movie, checking the in-memory cache
 /// before falling through to SQLite.
 async fn read_available_ratings_cached(state: &AppState, id_key: &str) -> Option<String> {
+    if state.config.louk.ratings_disabled { return None; } // louk-fork: never build keys from sources an enabled run recorded
     let db = state.db.clone();
     let min_stale = state.config.ratings_min_stale_secs;
     let max_age = state.config.ratings_max_age_secs;

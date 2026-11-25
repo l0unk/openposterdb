@@ -20,7 +20,7 @@ pub struct LoukConfig {
 impl LoukConfig {
     pub fn from_env() -> Self {
         Self {
-            ratings_disabled: parse_bool_env("RATINGS_DISABLED"),
+            ratings_disabled: parse_safety_bool_env("RATINGS_DISABLED"),
             backdrop_max_width: read_backdrop_max_width(),
         }
     }
@@ -42,6 +42,29 @@ fn read_backdrop_max_width() -> Option<u32> {
 /// for boolean env vars); anything else, or unset, is `false`.
 pub fn parse_bool_env(key: &str) -> bool {
     env::var(key).map(|v| v == "true" || v == "1").unwrap_or(false)
+}
+
+/// Strict boolean for safety flags (`RATINGS_DISABLED`): a typo must not
+/// silently mean "false" and re-enable rating spend. Trimmed, any case:
+/// `true`/`1`/`yes`/`on` → true; unset, empty, `false`/`0`/`no`/`off` → false;
+/// anything else panics at startup.
+pub fn parse_safety_bool_env(key: &str) -> bool {
+    let Ok(raw) = env::var(key) else { return false };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "" | "false" | "0" | "no" | "off" => false,
+        _ => panic!("{key} must be true/false/1/0/yes/no/on/off, got {raw:?}"),
+    }
+}
+
+/// `Config` with the OMDb, MDBList and Trakt keys removed, so `main.rs` never
+/// builds those clients (`RATINGS_DISABLED`). Logs the startup warning.
+pub fn without_rating_keys(mut c: crate::config::Config) -> crate::config::Config {
+    c.omdb_api_key = None;
+    c.mdblist_api_key = None;
+    c.trakt_client_id = None;
+    tracing::warn!("RATINGS_DISABLED=true: no rating lookups; images render without badges");
+    c
 }
 
 /// The `skip_ratings` a render should use: the caller's own choice, forced to
@@ -83,6 +106,26 @@ mod tests {
         }
         unsafe { env::remove_var(key) };
         assert!(!parse_bool_env(key));
+    }
+
+    #[test]
+    #[serial]
+    fn parse_safety_bool_env_is_strict() {
+        let key = "LOUK_TEST_PARSE_SAFETY_BOOL_ENV";
+        for (val, want) in [
+            ("true", true), ("1", true), ("yes", true), ("on", true), ("TRUE", true), (" True ", true), ("ON", true),
+            ("false", false), ("0", false), ("no", false), ("off", false), ("", false), ("  ", false), ("FALSE", false), ("Off", false),
+        ] {
+            unsafe { env::set_var(key, val) };
+            assert_eq!(parse_safety_bool_env(key), want, "value {val:?}");
+        }
+        for bad in ["ture", "2", "y", "enabled", "true1"] {
+            unsafe { env::set_var(key, bad) };
+            let r = std::panic::catch_unwind(|| parse_safety_bool_env(key));
+            assert!(r.is_err(), "value {bad:?} must panic");
+        }
+        unsafe { env::remove_var(key) };
+        assert!(!parse_safety_bool_env(key));
     }
 
     #[test]
