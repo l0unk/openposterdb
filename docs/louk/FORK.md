@@ -34,6 +34,7 @@ Two settings, a load harness and some documentation.
 | `RATINGS_DISABLED` | For dev and test only. No rating lookups at all, no badges, and the server starts without any rating provider. It guarantees a local instance or a load test can never call MDBList or OMDb. | `RATINGS_DISABLED=true`. A typo stops the server at startup instead of silently spending quota. | Off. **Never set it in production.** |
 | Load harness | Scripts to start a local instance and fire a catalog-sized burst (150 titles x poster, backdrop, logo, plus 40 episode stills) while recording peak memory and latency. Meant to measure memory. | `scripts/louk/README.md`. | Not part of the image. |
 | Backdrop safe-area notes | Where the AIOStreams app crops and darkens backdrops, and which existing settings keep ratings visible. No code. | See "Backdrop safe areas" below. | Nothing changes by itself. |
+| Badge looks | Three extra rating-badge looks made for the AIOStreams app: Score colour, Mono, One score (average). | Per key or globally, "Badge background" in each image box; see "Badge styles" below. | Off: every key keeps upstream's `Default`. |
 
 Both settings are documented in [configuration.md](../configuration.md#fork-only-loukdekkernl).
 
@@ -98,6 +99,13 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/tests/common/mod.rs:22,35` | `TestAppOptions` gets a `louk` field and its default. | low |
 | `api/tests/common/mod.rs:48,52,55` | `_setup_test_app` takes one extra argument `louk`; two callers pass it. These are long upstream lines edited in place. | medium |
 | `api/tests/common/mod.rs:135` | `louk` in the test `Config` literal. | low |
+| `api/src/louk/mod.rs:2` | `pub mod badge_looks;` (fork file, listed for completeness). | none |
+| `api/src/services/db.rs:247-295` | `BadgeBackground` gets three variants (`Score`, `Mono`, `Average`), their tokens `s`/`m`/`a`, the `as_str`/`parse` arms and a longer error message. Everything else (query param, settings JSON, DB, cache token `.bg<x>`, CDN hash) follows from `parse`/`as_str`. | medium (upstream adding its own background value would touch the same lines; pick tokens that do not clash) |
+| `api/src/image/badge.rs:38` | `section_colors` match arm for the three variants (the match is exhaustive; unreachable in practice). | low |
+| `api/src/image/badge.rs:218,376` | First line of `render_badges_uniform` and `render_vertical_badge`: fork looks are drawn by `louk::badge_looks`, upstream looks fall through unchanged. | low |
+| `api/src/image/generate.rs:359,443,632,732` | One line after `for_shape` in each `render_*_sync`: `badge_looks::collapse` turns the badge list into one average badge for the `a` look (borrows the list for every other look). | low |
+| `api/src/handlers/preview.rs:225,280,341,422` | The four preview handlers take spread sample scores for fork looks (`badge_looks::preview_samples`); upstream looks keep `sample_badges()`. Replaces 1 upstream line each. | low |
+| `web/src/components/RenderSettingsForm.vue:18` and 8 lines at 688-1211 | Imports `web/src/louk/badgeLooks.ts`; each of the four "Badge background" selects lists the fork looks (`v-for`) and shows a one-line description under the select when one is chosen. | low |
 | `.github/workflows/test.yml:7` | Runs on pushes to every branch, no `paths:` filter (upstream: `main` only, and only when `api/`, `web/` or the workflow change). | medium |
 | `.github/workflows/test.yml:20,37,58` | Three jobs pinned to `ubuntu-24.04`. `ubuntu-latest` is now 26.04 and Playwright 1.60 cannot install Chromium there. | medium. If upstream fixes this (new Playwright), take upstream's version and drop the pin. |
 | `.github/workflows/release.yml:6,10` | The whole file is rewritten: one amd64 job, ghcr only, no Docker Hub, no arm64, no manifest-merge job, runner pinned. | **high** (keep ours on every sync) |
@@ -107,7 +115,8 @@ Also changed, without a marker (documentation, easy to merge):
 | File | Change |
 | --- | --- |
 | `docs/configuration.md` | A "Fork-only (loukdekker.nl)" section appended at the end. |
-| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`. |
+| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`; one sub-bullet under `badge_background` for the fork looks. |
+| `docs/configuration.md` | A "Badge looks" subsection at the end of the fork section. |
 
 `Cargo.toml` and `Cargo.lock` are unchanged: the app still reports version `1.3.0`. The git tag
 carries the fork version. That keeps the most conflict-prone files out of the diff.
@@ -120,7 +129,10 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/config.rs` | `LoukConfig`, reads `RATINGS_DISABLED` and `BACKDROP_MAX_WIDTH`. |
 | `api/src/louk/backdrop_cap.rs` | All the cap logic (size plan, cache-key token, CDN hash, TMDB size) and its unit tests. |
 | `api/tests/louk_backdrop_cap.rs` | Route-level tests for the cap. |
-| `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
+| `api/src/louk/badge_looks.rs`, `api/src/louk/badge_looks/tests.rs` | The three badge looks (drawing, score scale, average, preview samples) and their unit tests, including `louk_defaults_do_not_change_cache_keys`. |
+| `api/tests/louk_badge_looks.rs` | Route-level tests: preview endpoints, image query param, global and per-key settings. |
+| `web/src/louk/badgeLooks.ts`, `web/src/louk/__tests__/badgeLooks.spec.ts` | Names and one-line descriptions of the looks for the settings form, and their test. |
+| `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence, `badge-styles.md` (design notes for the badge looks). |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 
 ### Workflow differences
@@ -211,7 +223,7 @@ Why it is safe:
 | **Memory measurements and allocator (P1.4 to P1.7)** | **No numbers exist.** The release build that was meant to measure them was interrupted on 2026-11-25 by a memory stall on the dev box (a cargo release build and a frontend build ran together under a small memory limit; the box thrashed for 5 hours). The load harness is ready in `scripts/louk/` (its self-test passes against a stub; it has never run against a real binary). The `BACKDROP_MAX_WIDTH` change is in, but its effect on peak memory is **not measured**. No allocator (mimalloc/jemalloc) is built in, `MALLOC_ARENA_MAX` is untested, and the in-flight render cache is not bounded. | One release build with `-j1`, then the runs A to D. Exact procedure in [memory.md](memory.md). A local branch `louk/p1-4` in the dev-box clone has the source at that point; it has the same content as `main`, so nothing is lost. |
 | **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`, CI green. The backend (title table, admin routes) is unfinished and uncommitted work in a local worktree (branch `louk/p2-1`); none of it is pushed. Not merged, not in any release. | Finish and commit the backend, then merge both, after a local smoke run against a real instance. Add the "upstream opens a fork-migrated database" test first. |
 | **Per-title overrides and uploads, and the upstream PR (P3)** | Not started. The design is written down (key = resolved title + image kind, value = TMDB path, Fanart image or upload; admin only). The wrong-logo case (The Man in the High Castle: three logos with 0 votes, upstream picks the last of equal ones) is not fixed. | Build after the dashboard, then prepare the branch `pr/per-title-overrides` from upstream `main` for Louk to open on GitHub. |
-| **New badge styles (P4)** | Not started. | Design 3 to 5 styles, each an option next to the existing `badge_style`, default unchanged. |
+| **New badge styles (P4)** | Three looks built (P4.1, branch `louk/p4-1`), default unchanged; see "Badge styles". Not yet seen on real art. | The gallery (P4.2) renders them on real titles at card, TV-row and phone-grid size; expect one tuning round. |
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |
 | **Safe-area preset in code (P5)** | **Documentation only, by decision.** The existing settings already express a safe area, so no preset and no crop overlay was built. | Louk sets one or two fields per key by hand (see "Backdrop safe areas"). |
 | MDBList quota view | Not built. | Only if the MDBList client already reads usage headers. |
@@ -219,9 +231,9 @@ Why it is safe:
 Spoiler blur for episode stills already exists upstream per key (`episode_blur`); the fork adds
 nothing there.
 
-Because the dashboard, overrides and badge styles are not built, there is nothing new in the
-dashboard to turn on. The only per-key looks to set are the existing backdrop settings named under
-"Backdrop safe areas". The deploy switches on no new looks.
+Because the dashboard and overrides are not built, the only new per-key choices are the badge looks
+(see "Badge styles", all off) and the existing backdrop settings named under "Backdrop safe areas".
+The deploy switches on no new looks.
 
 ## Known limits and open items
 
@@ -257,3 +269,37 @@ Evidence and numbers: [safe-areas.md](safe-areas.md), measured from the AIOStrea
 - A phone held upright shows only the middle third, so top-right badges vanish; only `position=tc` survives, at the cost of dimmer badges on the TV banner. No single setting serves both: use one key per device class.
 - No code preset was built: the existing `position`, `edge_inset_x/y`, `badge_direction` and `ratings_limit` settings already express this.
 - Open, needs a real-device check: TV overscan, trailers that replace the backdrop on TVs, the Android status bar over the phone banner, and the desktop app's window controls.
+
+## Badge styles
+
+Three extra looks for rating badges, made for the AIOStreams app (a dark UI, posters about 240 px wide
+on a TV across the room, small phone grids). They are extra choices in the existing **Badge background**
+setting, so nothing changes until you pick one. Design notes, colours and contrast:
+[badge-styles.md](badge-styles.md).
+
+| Name in the dashboard | Value | What you see |
+| --- | --- | --- |
+| Score colour | `s` | A dark plate with the source logo and a white number, and a bar along the bottom that fills with the score: teal for good (7 and up), amber for middling (5 to 6.9), red for weak. |
+| Mono | `m` | The same plate, lighter, with white source symbols instead of the coloured logos. No colour at all. |
+| One score (average) | `a` | One ring with the average of the shown ratings on a 0 to 10 scale; the ring fills with the score in the same colours. |
+
+**Where to turn them on.** Admin → API keys → the key's settings (or Admin → Settings for every key
+that has no settings of its own) → in the **Poster**, **Logo**, **Backdrop (series/movie)** and
+**Episode** boxes → **Badge background**. The preview next to each box shows the look with sample
+scores in all three colours. A single image can also ask for one with `?badge_background=s` (or `m`,
+`a`). The deploy turns none of them on.
+
+**Recommendation for the AIOStreams app: Score colour (`s`) on posters and episode stills, One score
+(`a`) on backdrops.** Score colour keeps the number white on a near-opaque plate, so it reads on bright
+and busy posters, and the coloured bar says "good or not" before the number is read, even at TV
+distance; its colours were chosen to stay apart for colour-blind viewers, and the bar's length carries
+the same information. On backdrops the default is a column of five badges at the top right, whose bottom
+two sit in the Home banner's dark fade (see "Backdrop safe areas"); one disc in that corner stays in
+the clean area. In phone grids no row of small badges reads, so a phone-only key would use `a` on
+posters too. These are recommendations from the design and the measurements, not yet from the gallery
+(P4.2), which shows them on real titles.
+
+Hooks: see the badge-look rows in "Divergence points in upstream files". Rollback: upstream reads a
+stored `s`, `m` or `a` as its default (`d`) and logs a warning; images keyed `.bgs`/`.bgm`/`.bga` are
+simply never requested again.
+

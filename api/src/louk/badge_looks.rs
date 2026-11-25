@@ -70,9 +70,12 @@ const BASE_VERT_GAP: f32 = 4.0;
 const RADIUS_SHARE: f32 = 0.22;
 /// Meter thickness as a share of the base badge height (5 px at 58).
 const METER_SHARE: f32 = 0.085;
-/// The Average disc is 1.35 badge heights across: it is alone, so it can be
-/// bigger than one badge of a row and still take less room than three.
-const DISC_SHARE: f32 = 1.35;
+/// The Average disc is 1.6 badge heights across (93 px at the 580 px
+/// poster): it is alone, so it can be bigger than one badge of a row (and
+/// its figures as tall as theirs) while taking less room than three.
+const DISC_SHARE: f32 = 1.6;
+/// Number size inside the disc, as a share of the disc (figures 0.6 of it).
+const DISC_FONT_SHARE: f32 = 0.36;
 /// Smallest badge height drawn (px); keeps tiny thumbnails from degenerating.
 const MIN_BADGE_HEIGHT: u32 = 4;
 
@@ -642,7 +645,7 @@ fn render_disc(score: Option<f32>, font: &FontArc, badge_scale: f32) -> RgbaImag
         None => "\u{2013}".to_string(),
     };
     let max_w = 2.0 * r_in * 0.78;
-    let mut size = (df * 0.34).max(1.0);
+    let mut size = (df * DISC_FONT_SHARE).max(1.0);
     let w = text_width(&text, &font.as_scaled(PxScale::from(size))) as f32;
     if w > max_w && w > 0.0 {
         size = (size * max_w / w).max(1.0);

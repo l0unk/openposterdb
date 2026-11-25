@@ -15,6 +15,7 @@ import {
 import RatingsOrderList from '@/components/RatingsOrderList.vue'
 import type { SaveSettingsPayload } from '@/lib/api'
 import { LANGUAGES, ALL_RATING_SOURCES, parseRatingsOrder, parseRatingsExclude } from '@/lib/constants'
+import { LOUK_BADGE_LOOKS, badgeLookDescription } from '@/louk/badgeLooks' // louk-fork:
 
 export interface RenderSettings {
   image_source: string
@@ -684,8 +685,11 @@ function toggleExclude(key: string, checked: boolean) {
                 <SelectItem value="k">Dark</SelectItem>
                 <SelectItem value="t">Transparent</SelectItem>
                 <SelectItem value="n">None</SelectItem>
+                <!-- louk-fork: fork badge looks -->
+                <SelectItem v-for="look in LOUK_BADGE_LOOKS" :key="look.value" :value="look.value">{{ look.label }}</SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="badgeLookDescription(editPosterBadgeBackground)" class="text-xs text-muted-foreground">{{ badgeLookDescription(editPosterBadgeBackground) }}</p> <!-- louk-fork: -->
           </div>
           <div class="space-y-2">
             <Label :for="inputId('poster-fit')">Aspect ratio</Label>
@@ -846,8 +850,11 @@ function toggleExclude(key: string, checked: boolean) {
                 <SelectItem value="k">Dark</SelectItem>
                 <SelectItem value="t">Transparent</SelectItem>
                 <SelectItem value="n">None</SelectItem>
+                <!-- louk-fork: fork badge looks -->
+                <SelectItem v-for="look in LOUK_BADGE_LOOKS" :key="look.value" :value="look.value">{{ look.label }}</SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="badgeLookDescription(editLogoBadgeBackground)" class="text-xs text-muted-foreground">{{ badgeLookDescription(editLogoBadgeBackground) }}</p> <!-- louk-fork: -->
           </div>
           <div class="space-y-1">
             <div class="flex items-center gap-3">
@@ -965,8 +972,11 @@ function toggleExclude(key: string, checked: boolean) {
                 <SelectItem value="k">Dark</SelectItem>
                 <SelectItem value="t">Transparent</SelectItem>
                 <SelectItem value="n">None</SelectItem>
+                <!-- louk-fork: fork badge looks -->
+                <SelectItem v-for="look in LOUK_BADGE_LOOKS" :key="look.value" :value="look.value">{{ look.label }}</SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="badgeLookDescription(editBackdropBadgeBackground)" class="text-xs text-muted-foreground">{{ badgeLookDescription(editBackdropBadgeBackground) }}</p> <!-- louk-fork: -->
           </div>
           <div class="space-y-2">
             <Label :for="inputId('backdrop-position')">Position</Label>
@@ -1194,8 +1204,11 @@ function toggleExclude(key: string, checked: boolean) {
                 <SelectItem value="k">Dark</SelectItem>
                 <SelectItem value="t">Transparent</SelectItem>
                 <SelectItem value="n">None</SelectItem>
+                <!-- louk-fork: fork badge looks -->
+                <SelectItem v-for="look in LOUK_BADGE_LOOKS" :key="look.value" :value="look.value">{{ look.label }}</SelectItem>
               </SelectContent>
             </Select>
+            <p v-if="badgeLookDescription(editEpisodeBadgeBackground)" class="text-xs text-muted-foreground">{{ badgeLookDescription(editEpisodeBadgeBackground) }}</p> <!-- louk-fork: -->
           </div>
           <div class="space-y-1">
             <div class="flex items-center gap-3">

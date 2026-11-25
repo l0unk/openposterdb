@@ -62,3 +62,12 @@ These variables exist only in the loukdekker.nl fork (see [docs/louk/FORK.md](lo
 |---|---|---|
 | `RATINGS_DISABLED` | `false` | **For dev and test instances only; never in production.** `true`, `1`, `yes` or `on` (any case, surrounding spaces ignored; `false`/`0`/`no`/`off`/empty mean off, any other value stops startup with an error) ignores `OMDB_API_KEY`, `MDBLIST_API_KEY` and `TRAKT_CLIENT_ID` (those clients are never built, so no rating quota is spent), skips the "one ratings source" startup check, and skips every rating lookup including TMDB votes. Images render without badges, and the `available_ratings` index is neither read nor written. Never run it behind a CDN or with `ENABLE_CDN_REDIRECTS=true`: CDN responses carry long cache lifetimes and would keep the badge-less art |
 | `BACKDROP_MAX_WIDTH` | unset | Integer from 320 to 3840. Unset (or invalid, which logs a warning and is ignored) keeps upstream widths. When set, backdrops whose `imageSize` is wider than this (`large`/`very-large` are 3840 px; `medium` 1920, `small` 1280) render at this width instead, keeping the aspect ratio and scaling badges with the canvas; the TMDB source is fetched at the smallest of `w1280`/`original` that covers it. Capped renders carry a `.mw<N>` cache-key token (and their own CDN-redirect hash), so they never mix with uncapped ones; sizes the cap does not reduce keep their upstream keys. Logos, posters and episode stills are unaffected. Production: `BACKDROP_MAX_WIDTH=1920` |
+
+### Badge looks (per API key or global, no environment variable)
+
+The fork adds three values to the existing **Badge background** setting (`*_badge_background`, per
+image kind) in Admin → Settings (global) and Admin → API keys → a key's settings: `s` **Score colour**,
+`m` **Mono** and `a` **One score (average)**. They are stored like upstream's values, can also be
+requested per image with `?badge_background=`, and change nothing unless chosen; the default stays `d`.
+After a rollback to upstream, a stored fork value is read as the default (`d`) with a warning in the log.
+Design notes and contrast figures: [louk/badge-styles.md](louk/badge-styles.md).

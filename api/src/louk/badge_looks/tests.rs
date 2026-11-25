@@ -558,7 +558,7 @@ fn backdrops_put_every_look_in_the_top_right_column() {
         );
         assert!((12..=28).contains(&y0), "{bg:?}: top margin {y0}");
         if bg == BadgeBackground::Average {
-            assert!(y1 < 20 + 78 + 12, "{bg:?}: a single disc ({y1})");
+            assert!(y1 < 20 + (58.0 * DISC_SHARE).round() as u32 + 12, "{bg:?}: a single disc ({y1})");
         } else {
             assert!(y1 > 400 && y1 < 1080 / 2 + 60, "{bg:?}: five badges ({y1})");
         }
