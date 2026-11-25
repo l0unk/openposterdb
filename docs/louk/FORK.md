@@ -26,7 +26,7 @@ harness).
 
 ## What it adds today
 
-Two settings, a load harness and some documentation.
+Two settings, the title dashboard backend, a load harness and some documentation.
 
 | Feature | What it does | How to turn it on | Default |
 | --- | --- | --- | --- |
@@ -36,6 +36,26 @@ Two settings, a load harness and some documentation.
 | Backdrop safe-area notes | Where the AIOStreams app crops and darkens backdrops, and which existing settings keep ratings visible. No code. | See "Backdrop safe areas" below. | Nothing changes by itself. |
 
 Both settings are documented in [configuration.md](../configuration.md#fork-only-loukdekkernl).
+
+### Title dashboard (backend)
+
+The admin dashboard only knew cache keys. The fork now keeps a title index in the SQLite database:
+every id an image was requested by (imdb, tmdb, tvdb, episode ids) and the title it belongs to, with
+name, year and TMDB poster. Admin endpoints under `/api/admin/louk/titles` list titles (search, filter,
+sort), show one title with all its cached images (shows: per season and episode, with TMDB episode
+names), find the title of an id, purge a title under all its ids, and re-fetch it. The contract is in
+[api.md](../api.md#title-dashboard-fork-only-admin). The Library and title pages (branch `louk/p2-2`)
+use it.
+
+- Code: `api/src/louk/{titles,handlers,routes,schema,state}.rs`; tests `api/tests/louk_titles.rs`.
+- On the image path the fork only notes the id in memory (no database, no network, no waiting). A
+  background task writes the notes every 30 s; up to 20 000 pending ids, beyond that new ones are
+  dropped until the next write (the backfill picks them up later).
+- Background TMDB calls: names/years for new titles, the backfill of old cache entries (50 every 10
+  minutes, first run 5 minutes after start) and episode names when a show's page is opened (kept 7
+  days). One call at a time, at least 250 ms apart. Never OMDb, MDBList or Trakt.
+- Always on; it changes no image, cache key or response. Tables: `louk_titles`,
+  `louk_title_aliases`, `louk_episodes`.
 
 ### Production setting
 
@@ -68,8 +88,8 @@ Every place where the fork edits a file upstream also has. These are the places 
 Line numbers are at `v1.3.0-louk.1` and drift; search for `louk-fork:`.
 
 To regenerate the list:
-`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (30 lines
-today).
+`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (43 lines
+with the title dashboard backend).
 
 Conflict risk on a sync: **low** = upstream's own line is untouched (the fork only added a line), so a
 conflict needs upstream to edit the same neighbourhood. **medium** = the hook replaces or wraps upstream
@@ -78,6 +98,12 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | File | What the hook does | Conflict risk |
 | --- | --- | --- |
 | `api/src/lib.rs:8` | `pub mod louk;` declares the fork module root. | low |
+| `api/src/lib.rs:69` | `AppState` gets one field `louk: Arc<LoukState>` (title index pending maps, TMDB pacing). | low |
+| `api/src/main.rs:161` | Runs the fork schema (`louk::schema::apply`) right after upstream's `MIGRATIONS` loop. | low |
+| `api/src/main.rs:341` | `louk` in the `AppState` literal. | low |
+| `api/src/main.rs:365` | Starts the title index workers (`louk::titles::spawn_workers`) after the `last_used_at` flush task. | low |
+| `api/src/routes/admin.rs:35` | Merges `louk::routes::louk_admin_routes()` into `admin_routes()`, so the fork routes get admin auth. | low |
+| `api/src/handlers/admin.rs:600` | `purge_title` made `pub(crate)` so the title purge reuses it. | low (same line as upstream's signature) |
 | `api/src/config.rs:24` | `Config` gets one field `louk: LoukConfig`, which carries all fork settings. | low |
 | `api/src/config.rs:49` | `Debug` impl prints that field. | low |
 | `api/src/config.rs:114` | `from_env` fills the field (`LoukConfig::from_env()`). | low |
@@ -87,17 +113,24 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/serve.rs:397` | First line of `read_available_ratings_cached`: with `RATINGS_DISABLED`, never build fast-path keys from rating sources an enabled run recorded. | low |
 | `api/src/image/serve.rs:420` | First line of `upsert_available_ratings_cached`: with `RATINGS_DISABLED`, do not overwrite the `available_ratings` index with an empty list. | low |
 | `api/src/image/serve.rs:449` | First line of `resolve_with_ratings`: `RATINGS_DISABLED` forces `skip_ratings` on every path. | low |
-| `api/src/image/serve.rs:1200` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
-| `api/src/image/serve.rs:1639` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
-| `api/src/image/serve.rs:1865` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
-| `api/src/image/serve.rs:1903` | Slow path of the same function: same added line. | low |
-| `api/src/image/serve.rs:2041` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:452` | `resolve_with_ratings`, after `id::resolve`: `louk::titles::note_resolved` notes the id and what it resolved to (before the episode uplift, so episode ids keep season/episode). In-memory only. | low |
+| `api/src/image/serve.rs:460` | Inside the episode uplift: `note_cross_ids` notes the show ids upstream also caches the render under. | low |
+| `api/src/image/serve.rs:713` | `handle_inner` (posters), after `validate_id_value`: `louk::titles::touch` notes the request time. In-memory only. | low |
+| `api/src/image/serve.rs:1699` | `handle_episode_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1815` | `handle_logo_backdrop_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1203` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:1642` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
+| `api/src/image/serve.rs:1870` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
+| `api/src/image/serve.rs:1908` | Slow path of the same function: same added line. | low |
+| `api/src/image/serve.rs:2046` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
 | `api/src/handlers/image.rs:528` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
 | `api/src/handlers/preview.rs:306` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
 | `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
 | `api/tests/common/mod.rs:22,35` | `TestAppOptions` gets a `louk` field and its default. | low |
 | `api/tests/common/mod.rs:48,52,55` | `_setup_test_app` takes one extra argument `louk`; two callers pass it. These are long upstream lines edited in place. | medium |
-| `api/tests/common/mod.rs:135` | `louk` in the test `Config` literal. | low |
+| `api/tests/common/mod.rs:136` | `louk` in the test `Config` literal. | low |
+| `api/tests/common/mod.rs:79` | Runs the fork schema after upstream's `MIGRATIONS` loop. | low |
+| `api/tests/common/mod.rs:193` | `louk` in the test `AppState` literal. | low |
 | `.github/workflows/test.yml:7` | Runs on pushes to every branch, no `paths:` filter (upstream: `main` only, and only when `api/`, `web/` or the workflow change). | medium |
 | `.github/workflows/test.yml:20,37,58` | Three jobs pinned to `ubuntu-24.04`. `ubuntu-latest` is now 26.04 and Playwright 1.60 cannot install Chromium there. | medium. If upstream fixes this (new Playwright), take upstream's version and drop the pin. |
 | `.github/workflows/release.yml:6,10` | The whole file is rewritten: one amd64 job, ghcr only, no Docker Hub, no arm64, no manifest-merge job, runner pinned. | **high** (keep ours on every sync) |
@@ -107,7 +140,7 @@ Also changed, without a marker (documentation, easy to merge):
 | File | Change |
 | --- | --- |
 | `docs/configuration.md` | A "Fork-only (loukdekker.nl)" section appended at the end. |
-| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`. |
+| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`; a "Title dashboard (fork-only, admin)" section appended at the end. |
 
 `Cargo.toml` and `Cargo.lock` are unchanged: the app still reports version `1.3.0`. The git tag
 carries the fork version. That keeps the most conflict-prone files out of the diff.
@@ -120,6 +153,11 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/config.rs` | `LoukConfig`, reads `RATINGS_DISABLED` and `BACKDROP_MAX_WIDTH`. |
 | `api/src/louk/backdrop_cap.rs` | All the cap logic (size plan, cache-key token, CDN hash, TMDB size) and its unit tests. |
 | `api/tests/louk_backdrop_cap.rs` | Route-level tests for the cap. |
+| `api/src/louk/schema.rs` | Fork tables (`louk_titles`, `louk_title_aliases`, `louk_episodes`), additive only. |
+| `api/src/louk/state.rs` | `LoukState`, the one `AppState` field: pending maps of the image-path hooks, TMDB pacing. |
+| `api/src/louk/titles.rs` | Title index: hooks, flush, details/backfill workers, queries shared with P3 (`aliases_for_title`). |
+| `api/src/louk/handlers.rs`, `routes.rs` | Title dashboard admin endpoints. |
+| `api/tests/louk_titles.rs` | Tests for the index, the endpoints and the rollback check (`upstream_schema_opens_fork_db`). |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 
@@ -177,9 +215,10 @@ Production pins the full tag (`ghcr.io/l0unk/openposterdb:v1.3.0-louk.1`), never
 
 ## Backups
 
-Everything stateful is in `./db` (SQLite: API keys and settings), which Backrest backs up. Today the
-fork writes nothing new there. When overrides and uploads arrive (not built yet), they will live in
-`./db` too.
+Everything stateful is in `./db` (SQLite: API keys and settings), which Backrest backs up. The title
+dashboard adds three tables there (`louk_titles`, `louk_title_aliases`, `louk_episodes`); they can be
+rebuilt from traffic and the backfill, so losing them only empties the library for a while. When
+overrides and uploads arrive (not built yet), they will live in `./db` too.
 
 The `cache` volume holds the rendered images. It is not backed up and does not need to be: every
 file is made again on request.
@@ -193,23 +232,23 @@ file is made again on request.
 
 Why it is safe:
 
-- The fork has **no schema changes** today. The database is the one upstream made. Nothing in `./db`
+- The fork's only schema change is three new tables with a `louk_` prefix (title dashboard). Upstream
+  does not know them and leaves them alone; no upstream table or column changes. Nothing in `./db`
   needs restoring for this rollback.
 - The `.mw1920` cache files are new names that upstream never builds. It ignores them. They only take
   disk space until you purge or clear the cache.
 - After a rollback, large backdrops come from the old 3840 px files if they are still on disk. If they
   were purged, upstream draws them again at 3840 px, with the old memory cost.
-- Not verified with a binary: no upstream binary was started against a database the fork touched.
-  There is nothing to test yet because no schema changes exist. When the dashboard and overrides add
-  tables, the rule is additive changes only, and a test (upstream opens a fork-migrated copy of the
-  database) must be added before they ship.
+- The test `upstream_schema_opens_fork_db` runs upstream's startup schema and migrations again on a
+  fork-migrated database with rows in the fork tables, then upstream queries and writes; it passes.
+  Not yet verified with a real upstream binary against a copy of the production database.
 
 ## Not done yet
 
 | Part | Where it stands | Next step |
 | --- | --- | --- |
 | **Memory measurements and allocator (P1.4 to P1.7)** | **No numbers exist.** The release build that was meant to measure them was interrupted on 2026-11-25 by a memory stall on the dev box (a cargo release build and a frontend build ran together under a small memory limit; the box thrashed for 5 hours). The load harness is ready in `scripts/louk/` (its self-test passes against a stub; it has never run against a real binary). The `BACKDROP_MAX_WIDTH` change is in, but its effect on peak memory is **not measured**. No allocator (mimalloc/jemalloc) is built in, `MALLOC_ARENA_MAX` is untested, and the in-flight render cache is not bounded. | One release build with `-j1`, then the runs A to D. Exact procedure in [memory.md](memory.md). A local branch `louk/p1-4` in the dev-box clone has the source at that point; it has the same content as `main`, so nothing is lost. |
-| **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`, CI green. The backend (title table, admin routes) is unfinished and uncommitted work in a local worktree (branch `louk/p2-1`); none of it is pushed. Not merged, not in any release. | Finish and commit the backend, then merge both, after a local smoke run against a real instance. Add the "upstream opens a fork-migrated database" test first. |
+| **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`. The backend (title index, admin endpoints, rollback test) is on branch `louk/p2-1`. Not merged, not in any release. | Merge both after a local smoke run against a real instance (check the library fills, names arrive, a show page lists seasons). |
 | **Per-title overrides and uploads, and the upstream PR (P3)** | Not started. The design is written down (key = resolved title + image kind, value = TMDB path, Fanart image or upload; admin only). The wrong-logo case (The Man in the High Castle: three logos with 0 votes, upstream picks the last of equal ones) is not fixed. | Build after the dashboard, then prepare the branch `pr/per-title-overrides` from upstream `main` for Louk to open on GitHub. |
 | **New badge styles (P4)** | Not started. | Design 3 to 5 styles, each an option next to the existing `badge_style`, default unchanged. |
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |

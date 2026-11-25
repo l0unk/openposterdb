@@ -1034,6 +1034,43 @@ mod tests {
     }
 
     #[test]
+    fn admin_image_urls_match_upstream_routes() {
+        assert_eq!(
+            admin_image_url(ImageType::Poster, "imdb", "tt1@ir.zm"),
+            "/api/admin/posters/imdb/tt1@ir.zm/image"
+        );
+        assert_eq!(
+            admin_image_url(ImageType::Logo, "tmdb", "movie-1_l_t@.zm"),
+            "/api/admin/logos/tmdb/movie-1_l_t@.zm"
+        );
+        assert_eq!(
+            admin_image_url(ImageType::Backdrop, "tvdb", "1_b@.zl"),
+            "/api/admin/backdrops/tvdb/1_b@.zl"
+        );
+        assert_eq!(
+            admin_image_url(ImageType::Episode, "imdb", "a b#c?d%/e"),
+            "/api/admin/episodes/imdb/a%20b%23c%3Fd%25%2Fe/image"
+        );
+    }
+
+    #[test]
+    fn kinds_round_trip() {
+        for kind in [
+            ImageType::Poster,
+            ImageType::Logo,
+            ImageType::Backdrop,
+            ImageType::Episode,
+        ] {
+            assert_eq!(image_type_of(kind.db_value()), Some(kind));
+            assert_eq!(image_type_of(kind.label()), Some(kind));
+            assert_eq!(image_type_from_name(kind.label()), Some(kind));
+        }
+        assert_eq!(image_type_of("x"), None);
+        assert_eq!(canonical_tmdb_value("movie", 603), "movie-603");
+        assert_eq!(canonical_tmdb_value("tv", 1399), "series-1399");
+    }
+
+    #[test]
     fn year_of_handles_short_and_odd_dates() {
         assert_eq!(year_of(Some("1999-03-31")), Some(1999));
         assert_eq!(year_of(Some("")), None);

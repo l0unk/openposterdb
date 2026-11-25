@@ -129,3 +129,21 @@ Fork (loukdekker.nl): when the server sets `BACKDROP_MAX_WIDTH`, backdrop sizes 
 | `very-large` / `verylarge` | 1920 × 1080 |
 
 `small` is only valid for backdrops and episodes — requesting it for posters or logos returns `400 Bad Request`. `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.
+
+## Title dashboard (fork-only, admin)
+
+Fork (loukdekker.nl) only. These endpoints sit under the admin login like every other `/api/admin/` route (`Authorization: Bearer <admin token>`; without it `401`). Errors are JSON `{"error": "<message>"}`: `400` for a bad parameter, `404` for an unknown title or id.
+
+The fork records every id an image is requested by (`imdb/tt0133093`, `tmdb/movie-603`, `tvdb/…`, episode ids such as `imdb/episode-tt0944947-S1E2`) and the title it belongs to. Names, years and poster paths are fetched from TMDB in the background (TMDB only, one call at a time); cache entries from before the fork are indexed by a slow background backfill. Times are Unix seconds.
+
+| Method | Path | What |
+|---|---|---|
+| `GET` | `/api/admin/louk/titles?q=&type=&sort=&page=&per_page=` | Title list. `q`: part of the name (case-insensitive), or an exact imdb id or tmdb id. `type`: `movie`, `tv` (empty or `all` = both). `sort`: `last` (default, last requested first) or `name`. `page` from 1, `per_page` default 48, max 200. Returns `{items: [title summary], total, page, per_page}`. |
+| `GET` | `/api/admin/louk/titles/{media_type}/{tmdb_id}` | One title (`media_type` = `movie` or `tv`): the summary fields plus `tvdb_id`, `first_seen`, `resolved_at`, `aliases`, `images` and, for shows only, `seasons`. |
+| `GET` | `/api/admin/louk/titles/by-alias/{id_type}/{id_value}` | Which title an id belongs to: `{media_type, tmdb_id}`, or `404`. A full cache value (`tt0133093@ir.zm`) is cut to its id. |
+| `POST` | `/api/admin/louk/titles/{media_type}/{tmdb_id}/purge` | Purges every cached image of the title under every id it is known by (the per-title purge of the admin cache pages, once per id and kind). Returns `{ok, external_cache_only, ids, files_deleted, meta_deleted, ratings_deleted, errors: [string]}`. The index itself is kept. |
+| `POST` | `/api/admin/louk/titles/{media_type}/{tmdb_id}/refetch?kind=` | Same as the admin cache pages' "fetch" (renders with the global settings; served from cache if already there) for the title's most recently requested id. `kind`: `poster`, `logo` or `backdrop`; omitted = all three. `episode` is `400` (fetch stills per episode with `POST /api/admin/episodes/{id_type}/{id_value}/fetch`). Returns `{ok, results: [{kind, id_type, id_value, ok, error}]}`. |
+
+Title summary: `{media_type, tmdb_id, name, year, imdb_id, poster_thumb_url, last_requested, image_counts: {poster, logo, backdrop, episode}}`. `name`, `year`, `imdb_id` and `poster_thumb_url` are `null` until known; `poster_thumb_url` is a TMDB `w185` URL the browser loads directly.
+
+In the detail: `aliases` = `[{id_type, id_value, season, episode, last_requested}]` (`season`/`episode` set for episode ids). `images` = every cached render of the title under any of its ids, newest first: `[{kind, id_type, cache_value, created_at, updated_at, admin_image_url}]`, where `admin_image_url` is the existing admin image endpoint for that row (needs the admin token). `seasons` (shows only) = `[{season, episodes: [{episode, name, air_date, still_thumb_url, cached: [image]}]}]` for the seasons that have a requested episode; episode names come from TMDB `/tv/{id}/season/{n}` on first view and are kept 7 days. `still_thumb_url` is a TMDB `w300` URL.
