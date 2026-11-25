@@ -5,6 +5,17 @@ Measures the server's memory under the burst a client causes when it opens a cat
 all fired at once, with Louk's exact URL patterns. Ratings are disabled, so no OMDb/MDBList
 quota is ever spent; the harness refuses to run otherwise.
 
+One variant, from a fresh instance, in one command (stop, wipe cache and db, start with the extra env,
+bootstrap, warm-up, burst, stop; needs the heavy slot). The binary and web files come from an extracted
+release image (`docs/louk/memory.md`, "How to repeat this"):
+
+```sh
+scripts/louk/run-variant.sh --binary "$BINARY" --static-dir "$STATIC_DIR" C3 -- \
+    BACKDROP_MAX_WIDTH=1920 MALLOC_ARENA_MAX=2 MALLOC_MMAP_THRESHOLD_=131072 2>&1 | tee ~/opdb-dev/results/C3.run.log
+```
+
+The steps by hand (what the script does):
+
 ```sh
 S=scripts/louk
 BIN=~/.cache/opdb-target/release/openposterdb-api
@@ -12,12 +23,32 @@ PROD='IMAGE_MEM_CACHE_MB=128 RENDER_CONCURRENCY=4 RATINGS_STALE_SECS=86400 RATIN
 $S/dev-instance.sh wipe-cache; $S/dev-instance.sh wipe-db
 $S/dev-instance.sh start $BIN $PROD BACKDROP_MAX_WIDTH=1920 MALLOC_ARENA_MAX=2   # extras per variant
 $S/dev-instance.sh bootstrap                 # admin louk-dev + API key in ~/opdb-dev/api-key (600)
+python3 -I $S/burst.py --warmup --label C-cap1920 --pid $(cat ~/opdb-dev/pid)   # REQUIRED on a fresh process, see below
 python3 -I $S/burst.py --label C-cap1920 --pid $(cat ~/opdb-dev/pid) --idle 90   # cold burst
 python3 -I $S/burst.py --label C-cap1920-warm --pid $(cat ~/opdb-dev/pid) --idle 30  # warm: same instance, no wipe
 $S/dev-instance.sh stop                      # always
 python3 -I $S/results-table.py               # compare all runs in ~/opdb-dev/results
 ```
 
+- `run-variant.sh [--binary BIN] [--static-dir DIR] [--no-warmup] <label> [burst.py flags] -- [VAR=VALUE ...]`:
+  the sequence above. Burst flags go to the warm-up and the burst (`--idle 90` is the default, `--idle 30`
+  overrides it). `BIN`/`DIR` default to `$OPDB_BINARY`/`$OPDB_STATIC_DIR`; results and the state dir follow
+  `OPDB_RESULTS` (default `<OPDB_DEV_HOME>/results`), `OPDB_DEV_HOME` and `OPDB_DEV_PORT`. The nine SPEC section 2
+  production settings are always set; the `VAR=VALUE` extras win over them. Prints which tuning variables
+  reached the process (names only) and the allocator libraries mapped (for `LD_PRELOAD` runs). Stops the
+  instance on every exit path. Exit codes: the burst's (0, 2, 3), 4 warm-up failed (no burst), 9 not started
+  (slice memory pressure avg60 >= 20), 1 other. `--no-warmup` exists only to reproduce the failure below.
+- `burst.py --warmup`: the warm-up pass (no burst, no result file). **Why:** a fresh process has empty
+  in-memory id and TMDB-image-list caches (the database only stores render metadata), so a cold burst sends
+  all 490 lookups to the TMDB API at once and TMDB answers 429 (the server returns 500; P1.4 run A0 had 135).
+  The warm-up asks for the same titles once at `--warmup-concurrency` (default 4) with **other render cache
+  keys** than the burst (posters `?badge_style=v`, logos `?badge_style=h`, backdrops and episodes
+  `?imageSize=small`; the burst uses the defaults and `?imageSize=large`), so the lookups are cached while every
+  render of the burst is still cold. It uses its own `X-Forwarded-For` groups (10.253.x.1), so the burst's rate-limit
+  buckets stay full. Same safety checks and `--rss-abort-mb` as the burst. Prints one line; exit 3 (`WARMUP
+  FAILED`) on any 429, transport error, or more than 5% errors (about 8 logos always fail to decode upstream:
+  500, well under that). The burst afterwards is labelled "warm" (it counts cache files, and the warm-up created
+  the small sources), but its own keys are cold: check `cache/` for the `.sh`/`.sv` pairs, or the render latency.
 - `dev-instance.sh start <binary> [VAR=VALUE ...]`: clean environment (everything the caller exported
   is unset in the launching subshell, then the defaults are exported and the binary is exec'd, so no
   key or secret is ever on a command line), `nice -n 19`, `127.0.0.1:3900`, state in `~/opdb-dev`
@@ -35,7 +66,8 @@ python3 -I $S/results-table.py               # compare all runs in ~/opdb-dev/re
   in memory.md. `--single-bucket` sends no header (one bucket, the prod-like case): expect ~250 429s and
   an INVALID run, or use `--titles-limit/--episodes-limit` to stay under 240 requests.
 - `burst.py`: options `--base --key-file --pid --label --idle --concurrency --out --titles
-  --titles-limit --episodes-limit --seed --timeout --nice --bucket-size --single-bucket --rss-abort-mb`.
+  --titles-limit --episodes-limit --seed --timeout --nice --bucket-size --single-bucket --rss-abort-mb
+  --warmup --warmup-concurrency`.
   `--timeout` defaults to 600 s (per socket read; queued renders must not time out). Writes
   `<out>/<label>.json` (+ `.md`): `requests, errors, status_counts, p50_ms/p95_ms/max_ms` (over the 200
   responses only, overall and per kind in `kinds`, with `n` = requests and `n_ok` = 200s),
@@ -65,4 +97,6 @@ python3 -I $S/results-table.py               # compare all runs in ~/opdb-dev/re
 - `titles.json`: committed list (100 movies + 50 shows with tmdb id, imdb id, type; 40 episodes of
   10 of those shows, S1E1-E4, by series imdb id). Regenerate with `fetch-titles.py` (TMDB only):
   `( set -a; . ~/.config/opdb-dev.env; set +a; unset OMDB_API_KEY MDBLIST_API_KEY; python3 -I scripts/louk/fetch-titles.py )`.
-- `selftest.sh`: offline check of all of the above against a throwaway stub server.
+- `selftest.sh`: offline check of all of the above (including the warm-up's cache keys and `run-variant.sh`
+  end to end) against a throwaway stub server. The stub rate-limits id lookups like TMDB does, so a burst
+  without the warm-up fails there too.
