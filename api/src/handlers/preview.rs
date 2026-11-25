@@ -219,7 +219,7 @@ pub async fn preview_poster(
     // 2. Check filesystem cache (never stale — deterministic output)
     if let Some(entry) = cache::read(&cache_path, 0).await {
         let bytes: bytes::Bytes = entry.bytes.into();
-        state.preview_cache.insert(cache_key, bytes.clone()).await;
+        if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
         return Ok(preview_response(bytes));
     }
 
@@ -227,18 +227,18 @@ pub async fn preview_poster(
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let poster_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Poster, image_size, SAMPLE_POSTER_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
+    let (poster_png, _louk_permit) = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Poster, image_size, SAMPLE_POSTER_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_poster_sync(&poster_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, split, poster_fit)
+        generate::render_poster_sync(&poster_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, split, poster_fit) // louk-fork: &Cow (sample or real art)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     cache::write(&cache_path, &buf).await?;
     let bytes = bytes::Bytes::from(buf);
-    state.preview_cache.insert(cache_key, bytes.clone()).await;
+    if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
 
     Ok(preview_response(bytes))
 }
@@ -277,25 +277,25 @@ pub async fn preview_logo(
 
     if let Some(entry) = cache::read(&cache_path, 0).await {
         let bytes: bytes::Bytes = entry.bytes.into();
-        state.preview_cache.insert(cache_key, bytes.clone()).await;
+        if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
         return Ok(preview_png_response(bytes));
     }
 
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let logo_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Logo, image_size, SAMPLE_LOGO_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
+    let (logo_png, _louk_permit) = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Logo, image_size, SAMPLE_LOGO_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_logo_sync(&logo_png, &badges, &font, badge_style, label_style, badge_appearance, target_width, badge_scale)
+        generate::render_logo_sync(&logo_png, &badges, &font, badge_style, label_style, badge_appearance, target_width, badge_scale) // louk-fork: &Cow (sample or real art)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     cache::write(&cache_path, &buf).await?;
     let bytes = bytes::Bytes::from(buf);
-    state.preview_cache.insert(cache_key, bytes.clone()).await;
+    if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
 
     Ok(preview_png_response(bytes))
 }
@@ -340,26 +340,26 @@ pub async fn preview_backdrop(
 
     if let Some(entry) = cache::read(&cache_path, 0).await {
         let bytes: bytes::Bytes = entry.bytes.into();
-        state.preview_cache.insert(cache_key, bytes.clone()).await;
+        if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
         return Ok(preview_response(bytes));
     }
 
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let backdrop_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Backdrop, image_size, SAMPLE_BACKDROP_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
+    let (backdrop_png, _louk_permit) = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Backdrop, image_size, SAMPLE_BACKDROP_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_backdrop_sync(&backdrop_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, edge_inset_x, edge_inset_y)
+        generate::render_backdrop_sync(&backdrop_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, edge_inset_x, edge_inset_y) // louk-fork: &Cow (sample or real art)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     cache::write(&cache_path, &buf).await?;
     let bytes = bytes::Bytes::from(buf);
-    state.preview_cache.insert(cache_key, bytes.clone()).await;
+    if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
 
     Ok(preview_response(bytes))
 }
@@ -423,26 +423,26 @@ pub async fn preview_episode(
 
     if let Some(entry) = cache::read(&cache_path, 0).await {
         let bytes: bytes::Bytes = entry.bytes.into();
-        state.preview_cache.insert(cache_key, bytes.clone()).await;
+        if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
         return Ok(preview_response(bytes));
     }
 
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let episode_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Episode, image_size, SAMPLE_EPISODE_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
+    let (episode_png, _louk_permit) = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Episode, image_size, SAMPLE_EPISODE_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_episode_sync(&episode_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, blur)
+        generate::render_episode_sync(&episode_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, blur) // louk-fork: &Cow (sample or real art)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
 
     cache::write(&cache_path, &buf).await?;
     let bytes = bytes::Bytes::from(buf);
-    state.preview_cache.insert(cache_key, bytes.clone()).await;
+    if louk_art.is_none() { state.preview_cache.insert(cache_key, bytes.clone()).await; } // louk-fork: art previews skip the entry-counted memory cache
 
     Ok(preview_response(bytes))
 }

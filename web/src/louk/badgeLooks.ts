@@ -23,7 +23,7 @@ export const LOUK_BADGE_LOOKS: readonly BadgeLook[] = [
   {
     value: 'a',
     label: 'One score (average)',
-    description: 'One figure, the average of the shown ratings on a 0–10 scale, with a ring that fills with it.',
+    description: 'One figure, the average of the shown ratings on 0–10, with a ring that fills with it: a pill on posters, a disc in the backdrop and episode-still column.',
   },
 ]
 

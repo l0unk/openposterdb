@@ -211,6 +211,17 @@ fn bands_follow_the_spec_thresholds() {
 #[test]
 fn collapse_averages_the_shown_sources() {
     let a = appearance(BadgeBackground::Average, BadgeShape::Rounded);
+    // MDBList's own aggregate is left out when other sources are shown ...
+    let with_mdb = vec![
+        rb(RatingSource::Imdb, "8.0"),
+        rb(RatingSource::Mdblist, "20"),
+    ];
+    assert_eq!(collapse(&with_mdb, a)[0].value, "8.0");
+    // ... and used when it is the only one.
+    assert_eq!(
+        collapse(&[rb(RatingSource::Mdblist, "68")], a)[0].value,
+        "6.8"
+    );
     let badges = vec![
         rb(RatingSource::Imdb, "8.0"),
         rb(RatingSource::Rt, "60%"),
@@ -323,7 +334,9 @@ fn score_and_mono_keep_upstreams_badge_size() {
         );
         // Same width as upstream; Mono keeps upstream's height, Score adds
         // the bar zone (52 content + 6 bar + 6 inset = 64).
-        assert_eq!(h.width(), up[0].width(), "{bg:?} horizontal width");
+        // Rows carry a larger figure than upstream (38 vs 34 px), so they are a
+        // little wider; heights are the family's: Mono upstream's 58, Score 64.
+        assert!(h.width() >= up[0].width(), "{bg:?} horizontal width");
         let expected_h = if bg == BadgeBackground::Score {
             64
         } else {
@@ -449,7 +462,8 @@ fn tiny_score_badges_drop_the_mark_and_keep_a_readable_figure() {
     let a = appearance(BadgeBackground::Score, BadgeShape::Rounded);
     let tiny = render_row(&badges, &f, LabelStyle::Official, a, 0.16).unwrap();
     // Figure at least 9 px: the badge is at least 9 * 1.45 + bar tall.
-    assert!(tiny[0].height() >= 13 + 2 + 1, "{:?}", tiny[0].dimensions());
+    // 9 px figure in a 12 px content zone, plus bar and inset.
+    assert!(tiny[0].height() >= 12 + 2 + 1, "{:?}", tiny[0].dimensions());
     // Three of them fit a 92 px poster with upstream's 2 px spacing.
     assert!(
         tiny.iter().map(|i| i.width()).sum::<u32>() + 4 <= 92,
@@ -561,7 +575,7 @@ fn average_pill_is_row_height_with_a_large_figure() {
         .unwrap();
         assert_eq!(row.len(), 1);
         let pill = &row[0];
-        let h = (64.0 * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
+        let h = (BASE_AVERAGE_PILL * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
         assert_eq!(pill.height(), h, "{value} {scale}");
         assert!(pill.width() > h, "a pill, wider than tall");
         let (x0, y0, x1, y1) = bright_bbox(pill);
@@ -648,7 +662,7 @@ fn posters_render_every_look_at_card_and_tiny_sizes() {
                     "{bg:?} {width}: centred ({left} vs {right})"
                 );
                 if bg == BadgeBackground::Average {
-                    let ph = (64.0 * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
+                    let ph = (BASE_AVERAGE_PILL * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
                     assert!(
                         x1 - x0 < width * 2 / 3,
                         "{bg:?} {width}: one pill, not a row"
@@ -755,6 +769,40 @@ fn logos_and_episodes_render_every_look() {
             )
             .unwrap();
             assert_eq!(&jpg[..2], &[0xFF, 0xD8]);
+        }
+    }
+}
+
+#[test]
+fn column_plates_share_one_height_whatever_the_mark() {
+    let f = font();
+    let sources = [
+        RatingSource::Mal,
+        RatingSource::Imdb,
+        RatingSource::Rt,
+        RatingSource::Metacritic,
+        RatingSource::Mdblist,
+    ];
+    for bg in [BadgeBackground::Score, BadgeBackground::Mono] {
+        for label in LABELS {
+            let heights: Vec<u32> = sources
+                .iter()
+                .map(|s| {
+                    render_vertical(
+                        &rb(*s, "8.1"),
+                        &f,
+                        label,
+                        appearance(bg, BadgeShape::Rounded),
+                        1.0,
+                    )
+                    .unwrap()
+                    .height()
+                })
+                .collect();
+            assert!(
+                heights.iter().all(|h| *h == heights[0]),
+                "{bg:?} {label:?}: {heights:?}"
+            );
         }
     }
 }

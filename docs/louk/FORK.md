@@ -93,9 +93,9 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/serve.rs:1865` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
 | `api/src/image/serve.rs:1903` | Slow path of the same function: same added line. | low |
 | `api/src/image/serve.rs:2041` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
-| `api/src/handlers/image.rs:528` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
-| `api/src/handlers/preview.rs:306` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
-| `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
+| `api/src/handlers/image.rs:529` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
+| `api/src/handlers/preview.rs:311` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
+| `api/src/handlers/preview.rs:332` | `preview_backdrop`: one added line for the capped preview cache key. | low |
 | `api/tests/common/mod.rs:22,35` | `TestAppOptions` gets a `louk` field and its default. | low |
 | `api/tests/common/mod.rs:48,52,55` | `_setup_test_app` takes one extra argument `louk`; two callers pass it. These are long upstream lines edited in place. | medium |
 | `api/tests/common/mod.rs:135` | `louk` in the test `Config` literal. | low |
@@ -105,8 +105,7 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/badge.rs:38` | `section_colors` match arm for the three variants (the match is exhaustive; unreachable in practice). | low |
 | `api/src/image/badge.rs:218,376` | First line of `render_badges_uniform` and `render_vertical_badge`: fork looks are drawn by `louk::badge_looks`, upstream looks fall through unchanged. | low |
 | `api/src/image/generate.rs:359,443,632,732` | One line after `for_shape` in each `render_*_sync`: `badge_looks::collapse` turns the badge list into one average badge for the `a` look (borrows the list for every other look). | low |
-| `api/src/handlers/preview.rs:225,280,341,422` | The four preview handlers take spread sample scores for fork looks (`badge_looks::preview_samples`); upstream looks keep `sample_badges()`. Replaces 1 upstream line each. | low |
-| `api/src/handlers/preview.rs` (each of the four preview handlers) | `?art=` real artwork: one extra extractor argument (`PreviewArt`), one line splicing the `.art…` token into the preview cache key (`preview_art::keyed`), the sample-image line replaced by `preview_art::source` (sample without `art`, the title's TMDB image with it), and `&` added to the render call's first argument. | medium (4 lines per handler; upstream edits to the preview handlers will touch them) |
+| `api/src/handlers/preview.rs` poster 182-241, logo 249-298, backdrop 306-362 (besides the cap lines), episode 391-445 | Per handler: an extra extractor argument `PreviewArt` (`?art=`); one line splicing the `.art…` token into the preview cache key (`preview_art::keyed`); the badges line takes the spread samples for fork looks and for any real-art preview (`badge_looks::preview_samples`, else upstream's `sample_badges()`); the sample-image line replaced by `preview_art::source` (the sample without `art`; with it, the title's TMDB image plus a render-semaphore permit held through the render); `&` on the render call's first argument; and both `preview_cache.insert` lines skip art previews (the memory cache counts entries, not bytes). Every touched line carries `louk-fork:`. | medium (upstream edits to the preview handlers will touch them) |
 | `web/src/components/RenderSettingsForm.vue:18` and 8 lines at 688-1211 | Imports `web/src/louk/badgeLooks.ts`; each of the four "Badge background" selects lists the fork looks (`v-for`) and shows a one-line description under the select when one is chosen. | low |
 | `.github/workflows/test.yml:7` | Runs on pushes to every branch, no `paths:` filter (upstream: `main` only, and only when `api/`, `web/` or the workflow change). | medium |
 | `.github/workflows/test.yml:20,37,58` | Three jobs pinned to `ubuntu-24.04`. `ubuntu-latest` is now 26.04 and Playwright 1.60 cannot install Chromium there. | medium. If upstream fixes this (new Playwright), take upstream's version and drop the pin. |
@@ -231,6 +230,7 @@ Why it is safe:
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |
 | **Safe-area preset in code (P5)** | **Documentation only, by decision.** The existing settings already express a safe area, so no preset and no crop overlay was built. | Louk sets one or two fields per key by hand (see "Backdrop safe areas"). |
 | MDBList quota view | Not built. | Only if the MDBList client already reads usage headers. |
+| Badge looks in the free-key form | `web/src/components/FreeApiKeyCard.vue` (self-service free keys) does not list `s`/`m`/`a`; the server accepts them. Production runs `FREE_KEY_ENABLED=false`. | Add the same `v-for` as in `RenderSettingsForm.vue` if free keys are ever enabled. |
 
 Spoiler blur for episode stills already exists upstream per key (`episode_blur`); the fork adds
 nothing there.
@@ -301,9 +301,17 @@ distance; its colours were chosen to stay apart for colour-blind viewers, and th
 the same information. On backdrops the default is a column of five badges at the top right, whose bottom
 two sit in the Home banner's dark fade (see "Backdrop safe areas"); one disc in that corner stays in
 the clean area. In phone grids no row of small badges reads, so a phone-only key would use `a` on
-posters too, with badge size Large or Extra large. These are recommendations from the design and the measurements; the gallery
+posters too; see "Phone-first keys" below. These are recommendations from the design and the measurements; the gallery
 (below) shows them on real titles and its first look did not contradict them (open tuning items are
 listed in the P4.2 report).
+
+**Phone-first keys.** A render cannot know how small the app will show it: a 580 px poster becomes a
+~130 px card in a 3-column phone grid (4.5x smaller), where a 20 px figure is 4-5 px. So for a key used
+mainly on phones: set **Badge background** to **One score (average)** (`a`), **Badge size** to
+**Extra large** (`badge_size=xl`, 1.5x: a 102 px pill with 48 px figures, about 10 px on the card), and,
+if you keep a row look, **Max ratings** to 1 or 2 (`ratings_limit=1|2`): fewer badges leave room for
+Large or Extra large badges in one row (upstream puts at most 2 large horizontal badges per row). All in
+the key's **Poster** box. Score colour stays the choice for the TV poster wall.
 
 **Gallery.** [badges.html](badges.html) shows every look (`d` for comparison, `s`, `m`, `a`) on six real
 titles chosen to stress them (very dark, very bright, busy, animated, white top-right on the backdrop):

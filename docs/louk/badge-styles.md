@@ -151,6 +151,28 @@ screenshotted them at TV-row, phone-grid and hero size. What the pixels showed, 
 Also for comparison: previews with `art=` now draw the spread sample scores for every look, `d` included,
 so default and fork looks can be compared value for value (previews without `art` are unchanged).
 
+## Fix round (second gallery pass and code review)
+
+- **Rows make the figure dominant.** In rows (posters, logos, horizontal backdrops) Score and Mono set
+  the figure in 38 px type (upstream 34; digits 23 px) and hold the source mark to a 36 px box (upstream
+  48). Score keeps its 64 px height (52 px content zone + bar), Mono upstream's 58. Columns keep 34/48,
+  because their width is fixed at 88 px. The One score pill is 68 px with the figure at 0.78 of it
+  (digits 32 px, 1.4x a row badge's) and a 38 px ring.
+- **Even columns.** Every mark in a column gets the same area (the icon box), so Mono's text marks (MAL,
+  IMDb, MDB) and icon marks make plates of one height, and Score's do too.
+- **Phone-first keys.** A render cannot know the card size, so legibility on a phone grid comes from the
+  settings: One score + Badge size Extra large (a 102 px pill, figures about 10 px on a 130 px card), and
+  for row looks Max ratings 1–2 so Large/Extra large badges fit one row. Details and setting names in
+  FORK.md, "Phone-first keys".
+- **One score and MDBList.** MDBList's score is itself an aggregate of IMDb, RT, Metacritic, Letterboxd and
+  more, so the mean leaves it out whenever another source is shown (it would count those twice); alone,
+  it is used as is.
+- **Real-art previews** take a render permit and skip the in-memory preview cache (code review).
+
+**Retuning a look needs a cache purge.** The tokens (`.bgs`, `.bgm`, `.bga`) stay the same when a look's
+drawing changes, so once a look is switched on in production, images already rendered keep the old
+drawing until they are purged (admin Cache page, or delete the files whose names contain the token).
+
 ## What was left out, and why
 
 - **Frosted glass.** A real blur behind the badge would be cheap (a box blur over about 100 x 200 px per

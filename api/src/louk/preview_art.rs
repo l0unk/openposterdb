@@ -15,6 +15,7 @@ use axum::http::StatusCode;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::AppState;
 use crate::cache::ImageType;
@@ -31,8 +32,10 @@ const MAX_ID_DIGITS: usize = 10;
 #[derive(Debug, Default, Deserialize)]
 pub struct ArtQuery {
     pub art: Option<String>,
-    pub season: Option<u32>,
-    pub episode: Option<u32>,
+    // Strings, parsed only when `art` is given: without `art`, a malformed
+    // season/episode is ignored, as upstream ignores unknown parameters.
+    pub season: Option<String>,
+    pub episode: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +66,14 @@ where
     async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
         let Query(q) = Query::<ArtQuery>::try_from_uri(&parts.uri)
             .map_err(|e| AppError::BadRequest(format!("invalid art/season/episode: {e}")))?;
-        let art = parse(q.art.as_deref(), q.season, q.episode)?;
+        let art = match q.art.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            None => None,
+            Some(raw) => parse(
+                Some(raw),
+                number(q.season.as_deref(), "season")?,
+                number(q.episode.as_deref(), "episode")?,
+            )?,
+        };
         if art.is_some() && !parts.uri.path().starts_with(ADMIN_PREFIX) {
             return Err(AppError::Forbidden(
                 "art= is only available on the admin previews".into(),
@@ -75,6 +85,17 @@ where
 
 /// Parse `art` (`movie-<id>`, `series-<id>` or `tv-<id>`). `None`/empty
 /// means "no real art".
+/// A season or episode number (only read when `art` is given).
+fn number(raw: Option<&str>, name: &str) -> Result<Option<u32>, AppError> {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        None => Ok(None),
+        Some(v) => v
+            .parse()
+            .map(Some)
+            .map_err(|_| AppError::BadRequest(format!("{name} must be a whole number, got {v:?}"))),
+    }
+}
+
 pub fn parse(
     art: Option<&str>,
     season: Option<u32>,
@@ -171,14 +192,23 @@ pub async fn source(
     kind: ImageType,
     image_size: Option<ImageSize>,
     sample: &'static [u8],
-) -> Result<Cow<'static, [u8]>, Response> {
+) -> Result<(Cow<'static, [u8]>, Option<OwnedSemaphorePermit>), Response> {
     let Some(art) = art else {
-        return Ok(Cow::Borrowed(sample));
+        return Ok((Cow::Borrowed(sample), None));
     };
-    fetch(&state.tmdb, &state.config.louk, art, kind, image_size)
+    let bytes = fetch(&state.tmdb, &state.config.louk, art, kind, image_size)
         .await
-        .map(Cow::Owned)
-        .map_err(|e| e.into_response())
+        .map_err(|e| e.into_response())?;
+    // A real TMDB original (up to 3840 px) is decoded next to production
+    // renders: take a render permit, like the image routes do, and let the
+    // caller hold it until its render is done.
+    let permit = state
+        .render_semaphore
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| ArtError::Upstream("render queue closed".into()).into_response())?;
+    Ok((Cow::Owned(bytes), Some(permit)))
 }
 
 /// Why fetching real art failed.
@@ -248,19 +278,19 @@ async fn fetch(
             // The same selection the real routes use (TMDB side; English,
             // not textless; backdrops are language-agnostic), falling back to
             // the first candidate.
-            let (candidates, selected) = match kind {
-                ImageType::Poster => (
-                    &images.posters,
-                    TmdbClient::select_poster(&images.posters, "en", false),
-                ),
-                ImageType::Logo => (
-                    &images.logos,
-                    TmdbClient::select_image(&images.logos, "en", false),
-                ),
-                _ => (
-                    &images.backdrops,
-                    TmdbClient::select_image(&images.backdrops, "", false),
-                ),
+            // SVG files (some TMDB logos) cannot be decoded: skip them.
+            let raster = |list: &[crate::services::tmdb::TmdbImage]| -> Vec<crate::services::tmdb::TmdbImage> {
+                list.iter().filter(|i| !i.file_path.to_ascii_lowercase().ends_with(".svg")).cloned().collect()
+            };
+            let candidates = match kind {
+                ImageType::Poster => raster(images.posters.as_slice()),
+                ImageType::Logo => raster(images.logos.as_slice()),
+                _ => raster(images.backdrops.as_slice()),
+            };
+            let selected = match kind {
+                ImageType::Poster => TmdbClient::select_poster(&candidates, "en", false),
+                ImageType::Logo => TmdbClient::select_image(&candidates, "en", false),
+                _ => TmdbClient::select_image(&candidates, "", false),
             };
             let img = selected.or_else(|| candidates.first()).ok_or_else(|| {
                 ArtError::NotFound(format!("TMDB has no {} for {label}", kind_name(kind)))
@@ -313,6 +343,15 @@ mod tests {
         );
         assert_eq!(parse(None, Some(1), Some(1)).unwrap(), None);
         assert_eq!(parse(Some("  "), None, None).unwrap(), None);
+    }
+
+    #[test]
+    fn season_and_episode_numbers() {
+        assert_eq!(number(None, "season").unwrap(), None);
+        assert_eq!(number(Some(" "), "season").unwrap(), None);
+        assert_eq!(number(Some("3"), "season").unwrap(), Some(3));
+        assert!(number(Some("x"), "season").is_err());
+        assert!(number(Some("-1"), "episode").is_err());
     }
 
     #[test]

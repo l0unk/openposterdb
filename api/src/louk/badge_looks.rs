@@ -77,19 +77,28 @@ const BASE_VERT_GAP: f32 = 4.0;
 const RADIUS_SHARE: f32 = 0.22;
 
 /// Score row badge: content zone 52, then the bar (6.4) and its bottom
-/// inset (5.6): 64 px in all. Marks fit a 42 px box inside the content zone.
+/// inset (5.6): 64 px in all.
 const BASE_SCORE_CONTENT: f32 = 52.0;
-const BASE_SCORE_ICON_BOX: f32 = 42.0;
+/// In rows (posters, logos, horizontal backdrops) the figure is the
+/// dominant element: 38 px type (upstream 34, digits 23 px) next to a source
+/// mark held to a 36 px box (upstream 48). Posters are shown 4-5x smaller on
+/// phones, so every pixel of figure counts there. Columns keep upstream's
+/// 34 / 48 (their width is fixed at 88).
+const BASE_ROW_FONT_SIZE: f32 = 38.0;
+const BASE_ROW_ICON_BOX: f32 = 36.0;
+/// Content zone height per pixel of figure type (38 px type in a 52 px zone).
+const CONTENT_PER_FONT_PX: f32 = 1.3;
 const BASE_BAR_THICKNESS: f32 = 6.4;
 const BASE_BAR_BOTTOM: f32 = 5.6;
 /// Smallest distance between the bar's ends and the plate's sides.
 const BASE_BAR_SIDE: f32 = 10.0;
 
-/// Average pill: as tall as a Score badge (64), figure 0.70 of that
-/// (digits 27 px, taller than a row badge's 20 px), ring dial 0.62.
-const BASE_AVERAGE_PILL: f32 = 64.0;
-const PILL_FONT_SHARE: f32 = 0.70;
-const PILL_DIAL_SHARE: f32 = 0.62;
+/// Average pill: 68 px, about a Score badge's height, so it sits in the
+/// row's band; the figure is the pill's main element at 0.78 of its height
+/// (digits 32 px, 1.4x a row badge's), the ring dial 0.56.
+const BASE_AVERAGE_PILL: f32 = 68.0;
+const PILL_FONT_SHARE: f32 = 0.78;
+const PILL_DIAL_SHARE: f32 = 0.56;
 /// Ring thickness as a share of the dial / disc diameter.
 const DIAL_RING_SHARE: f32 = 0.16;
 /// Average disc (columns): 1.6 badge heights across (93 px at 580),
@@ -217,11 +226,22 @@ pub fn average_text(score: f32) -> String {
 /// of their normalised scores (on IMDb's 0–10 scale, which `normalized_score`
 /// reads back). No parseable rating means no badge. Every other look borrows
 /// the input unchanged.
+///
+/// MDBList's own score is already an aggregate of the other sources, so it
+/// is left out of the mean when any other source is shown (otherwise it
+/// would count those sources twice); alone, it is used as is.
 pub fn collapse(badges: &[RatingBadge], appearance: BadgeAppearance) -> Cow<'_, [RatingBadge]> {
     if appearance.background != BadgeBackground::Average {
         return Cow::Borrowed(badges);
     }
-    let scores: Vec<f32> = badges.iter().filter_map(normalized_score).collect();
+    let others = badges
+        .iter()
+        .any(|b| b.source != RatingSource::Mdblist && normalized_score(b).is_some());
+    let scores: Vec<f32> = badges
+        .iter()
+        .filter(|b| !(others && b.source == RatingSource::Mdblist))
+        .filter_map(normalized_score)
+        .collect();
     if scores.is_empty() {
         return Cow::Owned(Vec::new());
     }
@@ -370,7 +390,12 @@ impl Metrics {
             BadgeShape::Rounded => (0, 0),
         };
         let compact = !vertical && scale < COMPACT_BELOW;
-        let font_px = (BASE_FONT_SIZE * scale).max(if compact { MIN_FIGURE_PX } else { 1.0 });
+        let font_base = if vertical {
+            BASE_FONT_SIZE
+        } else {
+            BASE_ROW_FONT_SIZE
+        };
+        let font_px = (font_base * scale).max(if compact { MIN_FIGURE_PX } else { 1.0 });
         let score = look == Look::Score;
         let content_base = if score && !vertical {
             BASE_SCORE_CONTENT
@@ -378,7 +403,7 @@ impl Metrics {
             BASE_BADGE_HEIGHT
         };
         let content_h = (px(content_base, scale) + pill_pad_v)
-            .max((font_px * 1.45).ceil() as u32)
+            .max((font_px * CONTENT_PER_FONT_PX).ceil() as u32)
             .max(MIN_BADGE_HEIGHT);
         let (bar_t, bar_bottom) = if score {
             (
@@ -388,10 +413,10 @@ impl Metrics {
         } else {
             (0, 0)
         };
-        let icon_base = if score && !vertical {
-            BASE_SCORE_ICON_BOX
-        } else {
+        let icon_base = if vertical {
             BASE_ICON_HEIGHT
+        } else {
+            BASE_ROW_ICON_BOX
         };
         Self {
             content_h,
@@ -624,9 +649,10 @@ fn render_vertical_inner(
 ) -> RgbaImage {
     let w = px(BASE_VERT_BADGE_WIDTH, m.scale).max(MIN_BADGE_HEIGHT);
     let pad_v = px(BASE_VERT_BADGE_PADDING_V, m.scale) + m.pill_pad;
+    // Every mark gets the same area, text included, so all plates in a
+    // column have one height (text labels are centred in it).
     let label_area_h = match mark {
-        Mark::Image(_) => m.icon_box,
-        Mark::Text(..) => m.label_scale.y as u32,
+        Mark::Image(_) | Mark::Text(..) => m.icon_box,
         Mark::None => 0,
     };
     let gap = px(BASE_VERT_GAP, m.scale);

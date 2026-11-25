@@ -220,15 +220,31 @@ async fn global_and_per_key_settings_store_fork_looks() {
 
 // --- ?art= (real artwork in admin previews, `louk::preview_art`) ---
 
+/// One request on a fresh app with its own cache dir, so nothing comes
+/// from the memory or disk preview caches.
+async fn fresh_preview(uri: &str) -> (StatusCode, Vec<u8>) {
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let n = N.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let dir = std::env::temp_dir().join(format!("louk-badge-looks-{}-{n}", std::process::id()));
+    let (app, _state) = common::setup_test_app_with_options(common::TestAppOptions {
+        cache_dir_override: Some(dir.to_string_lossy().into_owned()),
+        ..Default::default()
+    })
+    .await;
+    let token = common::setup_admin(&app).await;
+    get_bytes(&app, uri, &token).await
+}
+
 #[tokio::test]
 async fn preview_without_art_is_unchanged_by_season_and_episode() {
-    let (app, _state) = common::setup_test_app().await;
-    let token = common::setup_admin(&app).await;
     for kind in ["poster", "backdrop", "logo", "episode"] {
-        let (s1, plain) = get_bytes(&app, &format!("/api/admin/preview/{kind}?badge_background=s"), &token).await;
-        let (s2, with) = get_bytes(&app, &format!("/api/admin/preview/{kind}?badge_background=s&season=1&episode=2&art="), &token).await;
-        assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK), "{kind}");
-        assert_eq!(plain, with, "{kind}: no art means the usual sample image");
+        for bg in ["d", "s"] {
+            let (s1, plain) = fresh_preview(&format!("/api/admin/preview/{kind}?badge_background={bg}")).await;
+            // Without art, season/episode are ignored even when malformed (as upstream ignores them).
+            let (s2, with) = fresh_preview(&format!("/api/admin/preview/{kind}?badge_background={bg}&season=x&episode=1&art=")).await;
+            assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK), "{kind} {bg}");
+            assert_eq!(plain, with, "{kind} {bg}: no art means the usual sample render");
+        }
     }
 }
 
