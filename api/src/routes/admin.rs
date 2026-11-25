@@ -32,4 +32,15 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
             "/api/admin/settings",
             get(handlers::admin::get_settings).put(handlers::admin::update_settings),
         )
+        .route("/api/admin/overrides/{media_type}/{tmdb_id}", get(handlers::overrides::list_overrides))
+        .route(
+            "/api/admin/overrides/{media_type}/{tmdb_id}/{kind}",
+            get(handlers::overrides::get_override)
+                .put(handlers::overrides::put_override)
+                .delete(handlers::overrides::delete_override),
+        )
+        .route("/api/admin/overrides/{media_type}/{tmdb_id}/{kind}/candidates", get(handlers::overrides::list_candidates))
+        .route("/api/admin/uploads", post(handlers::overrides::upload))
+        .route("/api/admin/uploads/{sha256}", get(handlers::overrides::get_upload))
+        .route("/api/admin/resolve/{id_type}/{id_value}", get(handlers::overrides::resolve_title))
 }

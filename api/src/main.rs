@@ -337,6 +337,7 @@ async fn main() {
         cross_id_semaphore,
         settings_hash_registry,
         available_ratings_cache,
+        overrides: Arc::new(openposterdb_api::services::overrides::store::OverrideStore::new()),
         config: config.clone(),
     });
 

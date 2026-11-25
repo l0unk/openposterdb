@@ -3,6 +3,7 @@ pub mod fanart;
 pub mod lang;
 pub mod mdblist;
 pub mod omdb;
+pub mod overrides;
 pub mod ratings;
 pub mod retry;
 pub mod tmdb;

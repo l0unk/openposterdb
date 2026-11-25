@@ -186,6 +186,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
             .max_capacity(1000)
             .time_to_live(Duration::from_secs(300))
             .build(),
+        overrides: Arc::new(openposterdb_api::services::overrides::store::OverrideStore::new()),
     });
 
     let app = build_app(state.clone());
