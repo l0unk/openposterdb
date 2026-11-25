@@ -40,6 +40,8 @@ pub struct SwrState {
     permits: Arc<Semaphore>,
     /// Revalidations started (tests and diagnostics).
     pub started: AtomicU64,
+    /// Replays dropped because the index was fresh again by the time they ran.
+    pub skipped_fresh: AtomicU64,
     /// Stale hits that found every revalidation slot busy (served stale, no
     /// revalidation; a later request tries again).
     pub skipped_busy: AtomicU64,
@@ -50,6 +52,7 @@ impl SwrState {
         Self {
             permits: Arc::new(Semaphore::new(MAX_CONCURRENT)),
             started: AtomicU64::new(0),
+            skipped_fresh: AtomicU64::new(0),
             skipped_busy: AtomicU64::new(0),
         }
     }
@@ -125,7 +128,7 @@ pub enum Replay {
 
 /// Fast-path hook on a cache hit built from a stale row: start the request's
 /// slow path in the background, deduplicated per cache key and bounded.
-pub fn revalidate(state: &AppState, cache_key: &str, replay: Replay) {
+pub fn revalidate(state: &AppState, id_key: &str, cache_key: &str, replay: Replay) {
     let swr = &state.louk.swr;
     let Ok(permit) = swr.permits.clone().try_acquire_owned() else {
         swr.skipped_busy.fetch_add(1, Ordering::Relaxed);
@@ -136,11 +139,28 @@ pub fn revalidate(state: &AppState, cache_key: &str, replay: Replay) {
     if !entry.is_fresh() {
         return; // one is already running for this key; the permit drops here
     }
-    swr.started.fetch_add(1, Ordering::Relaxed);
-    tracing::info!(key = %cache_key, "louk-swr: served stale index, revalidating");
     let state = state.clone();
     let key = cache_key.to_owned();
+    let id_key = id_key.to_owned();
     tokio::spawn(REVALIDATING.scope((), async move {
+        // A request that read the stale row just before an earlier replay
+        // refreshed it lands here after that replay released the lock: the
+        // index is fresh again, nothing to do.
+        let fresh = crate::cache::read_available_ratings(
+            &state.db,
+            &id_key,
+            state.config.ratings_min_stale_secs,
+            state.config.ratings_max_age_secs,
+        )
+        .await
+        .is_some();
+        if fresh {
+            state.louk.swr.skipped_fresh.fetch_add(1, Ordering::Relaxed);
+            state.refresh_locks.invalidate(&lock_key);
+            return;
+        }
+        state.louk.swr.started.fetch_add(1, Ordering::Relaxed);
+        tracing::info!(key = %key, "louk-swr: served stale index, revalidating");
         let start = Instant::now();
         let result = match replay {
             Replay::Poster {

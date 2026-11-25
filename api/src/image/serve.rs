@@ -766,7 +766,7 @@ pub async fn handle_inner(
                             "slow poster request (fast path hit)"
                         );
                     }
-                    if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::Poster { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
+                    if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::Poster { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
                     return Ok((bytes, release_date));
                 }
             }
@@ -1736,7 +1736,7 @@ pub async fn handle_episode_inner(
             trigger_episode_refresh(s, k, p, id_type, id_value, &cache_suffix, &settings, image_size);
         }).await? {
             let release_date = cache::read_meta_db(&state.db, &cache_key).await;
-            if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::Episode { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
+            if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::Episode { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
             return Ok((bytes, release_date));
         }
     }
@@ -1897,7 +1897,7 @@ pub async fn handle_logo_backdrop_inner(
                 trigger_logo_backdrop_refresh(s, k, p, id_type, &id_value, &lb_cache_suffix, &settings, lb_kind, image_size);
             }).await? {
                 let release_date = cache::read_meta_db(&state.db, &cache_key).await;
-                if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::LogoBackdrop { id_type: id_type_str.into(), id_value: id_value_raw.into(), settings: settings.clone(), kind: lb_kind, image_size }); } // louk-fork: SWR
+                if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::LogoBackdrop { id_type: id_type_str.into(), id_value: id_value_raw.into(), settings: settings.clone(), kind: lb_kind, image_size }); } // louk-fork: SWR
                 return Ok((bytes, release_date));
             }
         }

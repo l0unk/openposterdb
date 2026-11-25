@@ -187,7 +187,6 @@ async fn swr_serves_cached_image_and_revalidates_once() {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, first, "stale hit serves the cached image");
     }
-    assert_eq!(a.state.louk.swr.started.load(Ordering::Relaxed), 1, "deduplicated");
 
     // The revalidation ran the upstream slow path: index row refreshed.
     assert!(wait_for_row_refresh(&a.state, &a.id_key).await, "revalidation refreshed the index");
@@ -198,6 +197,9 @@ async fn swr_serves_cached_image_and_revalidates_once() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     assert!(a.state.refresh_locks.iter().all(|(k, _)| !k.starts_with("louk-swr:")), "lock released");
+    // One replay ran; a request that read the stale row while it ran may
+    // have queued another, which finds the index fresh and does nothing.
+    assert_eq!(a.state.louk.swr.started.load(Ordering::Relaxed), 1, "deduplicated");
 
     // Fresh index again: the normal fast path, no new revalidation.
     let (status, body) = get(&a).await;

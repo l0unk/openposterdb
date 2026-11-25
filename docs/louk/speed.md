@@ -268,7 +268,8 @@ is upstream's slow path: one ratings fetch (`ratings_cache` coalesces concurrent
 and a render under a new key if the source set changed, or the existing file refresh if the file is
 stale. Bounds: one replay per cache key (`refresh_locks`, key `louk-swr:<cache key>`), at most two at
 once; when both are busy the request is served stale without a replay and a later request tries again,
-so replays never pile up during a burst. Ignored with `RATINGS_DISABLED`.
+so replays never pile up during a burst. A replay first re-reads the index and does nothing if an
+earlier replay already refreshed it. Ignored with `RATINGS_DISABLED`.
 
 How to see it in production (after setting `LOUK_RATINGS_SWR=true`):
 
