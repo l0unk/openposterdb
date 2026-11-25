@@ -12,6 +12,7 @@ import {
   Film,
   Image,
   Loader2,
+  Pencil,
   RotateCw,
   Stamp,
   Trash2,
@@ -26,6 +27,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Skeleton } from '@/components/ui/skeleton'
 import RefreshButton from '@/components/RefreshButton.vue'
 import ImageTile from '@/louk/components/ImageTile.vue'
+import OverridePicker from '@/louk/components/OverridePicker.vue'
 import SeasonList from '@/louk/components/SeasonList.vue'
 import {
   fetchImageBlob,
@@ -41,6 +43,7 @@ import {
   type TitleImage,
 } from '@/louk/api'
 import { relativeTime } from '@/louk/format'
+import type { OverrideTarget } from '@/louk/overrides'
 
 const route = useRoute()
 const router = useRouter()
@@ -94,12 +97,12 @@ function goBack() {
 }
 
 // --- status banner (success or failure of the last action) ---
-const banner = ref<{ ok: boolean; text: string } | null>(null)
+const banner = ref<{ ok: boolean; text: string; action?: { label: string; run: () => Promise<void> } } | null>(null)
 let bannerTimer: ReturnType<typeof setTimeout> | undefined
-function say(ok: boolean, text: string) {
-  banner.value = { ok, text }
+function say(ok: boolean, text: string, action?: { label: string; run: () => Promise<void> }) {
+  banner.value = { ok, text, action }
   clearTimeout(bannerTimer)
-  if (ok) bannerTimer = setTimeout(() => (banner.value = null), 8000)
+  if (ok) bannerTimer = setTimeout(() => (banner.value = null), action ? 30000 : 8000)
 }
 onBeforeUnmount(() => clearTimeout(bannerTimer))
 
@@ -193,6 +196,71 @@ function askRefetch(kind?: Exclude<ImageKind, 'episode'>) {
     run: () => refetchTitle(t.media_type, t.tmdb_id, kind),
     done: `Re-fetched the ${what} of ${label.value}.`,
   })
+}
+
+// --- art override picker (louk-fork: P3.3) ---
+const pickerOpen = ref(false)
+const pickerTarget = ref<OverrideTarget | null>(null)
+const pickerHeading = ref('')
+const pickerRendered = ref<TitleImage | null>(null)
+// Bumped after every override change: the tiles ask the server again instead of showing the browser's copy.
+const bust = ref(0)
+
+const APPS_NOTE = 'Apps show the new art once their own caches expire.'
+
+function openPicker(kind: Exclude<ImageKind, 'episode'>) {
+  const t = data.value
+  if (!t) return
+  pickerTarget.value = { mediaType: t.media_type, tmdbId: t.tmdb_id, kind }
+  pickerHeading.value = label.value
+  pickerRendered.value = imagesOf(kind)[0] ?? null
+  pickerOpen.value = true
+}
+
+function openEpisodePicker(ep: { season: number; episode: number; name: string; rendered: TitleImage | null }) {
+  const t = data.value
+  if (!t) return
+  pickerTarget.value = { mediaType: t.media_type, tmdbId: t.tmdb_id, kind: 'episode', season: ep.season, episode: ep.episode }
+  pickerHeading.value = `${label.value}, ${ep.season === 0 ? 'specials' : `season ${ep.season}`} episode ${ep.episode} (${ep.name})`
+  pickerRendered.value = ep.rendered
+  pickerOpen.value = true
+}
+
+async function onOverrideChanged(change: { kind: ImageKind; message: string; redrawable: boolean }) {
+  bust.value = Date.now()
+  const text = `${change.message} The cached ${change.kind === 'episode' ? 'still' : change.kind} was removed and is drawn again on the next request. ${APPS_NOTE}`
+  const kind = change.kind
+  say(
+    true,
+    text,
+    change.redrawable && kind !== 'episode'
+      ? {
+          label: 'Draw it now',
+          run: async () => {
+            const t = data.value
+            if (t) await refetchTitle(t.media_type, t.tmdb_id, kind)
+          },
+        }
+      : undefined,
+  )
+  await reload()
+}
+
+const bannerBusy = ref(false)
+async function runBannerAction() {
+  const a = banner.value?.action
+  if (!a || bannerBusy.value) return
+  bannerBusy.value = true
+  try {
+    await a.run()
+    bust.value = Date.now()
+    say(true, `Drew the image again. ${APPS_NOTE}`)
+  } catch (e) {
+    say(false, `Drawing the image failed: ${e instanceof Error ? e.message : 'the request failed'}`)
+  } finally {
+    bannerBusy.value = false
+    await reload()
+  }
 }
 
 // --- image viewer ---
@@ -362,7 +430,19 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
       >
         <Check v-if="banner.ok" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <TriangleAlert v-else class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-        <span class="min-w-0 break-words">{{ banner.text }}</span>
+        <span class="min-w-0 flex-1 break-words">{{ banner.text }}</span>
+        <Button
+          v-if="banner.action"
+          variant="outline"
+          size="sm"
+          class="-my-1 shrink-0"
+          :disabled="bannerBusy"
+          data-testid="banner-action"
+          @click="runBannerAction"
+        >
+          <Loader2 v-if="bannerBusy" class="animate-spin" />
+          {{ banner.action.label }}
+        </Button>
       </div>
 
       <Collapsible v-if="data.aliases.length" class="rounded-lg border">
@@ -394,14 +474,15 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
               <RotateCw />
               Re-fetch
             </Button>
-            <Button variant="outline" size="sm" disabled title="Choosing your own art arrives in a later update">
-              Override (coming)
+            <Button variant="outline" size="sm" :data-testid="`override-${s.kind}`" @click="openPicker(s.kind)">
+              <Pencil />
+              Override
             </Button>
           </div>
         </div>
         <ul v-if="imagesOf(s.kind).length" class="grid gap-4" :class="s.grid">
-          <li v-for="img in imagesOf(s.kind)" :key="img.cache_value" class="min-w-0">
-            <ImageTile :image="img" @view="openView" @purge="askPurgeImage" />
+          <li v-for="img in imagesOf(s.kind)" :key="`${img.cache_value}:${bust}`" class="min-w-0">
+            <ImageTile :image="img" :bust="bust" @view="openView" @purge="askPurgeImage" />
           </li>
         </ul>
         <p v-else class="py-2 text-sm text-muted-foreground">
@@ -421,6 +502,7 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
           :seasons="data.seasons"
           @view="openView"
           @purge="askPurgeImage"
+          @override="openEpisodePicker"
         />
         <p v-else class="py-2 text-sm text-muted-foreground">
           The season list has not been fetched from TMDB yet. Refresh in a moment.
@@ -428,8 +510,8 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
         <div v-if="looseEpisodes.length" class="space-y-3">
           <h3 class="text-sm font-medium">Other episode images</h3>
           <ul class="grid grid-cols-[repeat(auto-fill,minmax(16rem,1fr))] gap-4">
-            <li v-for="img in looseEpisodes" :key="img.cache_value" class="min-w-0">
-              <ImageTile :image="img" @view="openView" @purge="askPurgeImage" />
+            <li v-for="img in looseEpisodes" :key="`${img.cache_value}:${bust}`" class="min-w-0">
+              <ImageTile :image="img" :bust="bust" @view="openView" @purge="askPurgeImage" />
             </li>
           </ul>
         </div>
@@ -452,6 +534,14 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
         </div>
       </DialogContent>
     </Dialog>
+
+    <OverridePicker
+      v-model:open="pickerOpen"
+      :target="pickerTarget"
+      :heading="pickerHeading"
+      :rendered="pickerRendered"
+      @changed="onOverrideChanged"
+    />
 
     <Dialog :open="viewOpen" @update:open="(v: boolean) => { if (!v) closeView() }">
       <DialogContent :class="viewSize">

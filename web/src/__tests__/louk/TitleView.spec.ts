@@ -6,6 +6,11 @@ import { createRouter, createMemoryHistory } from 'vue-router'
 import { showDetail, summary } from './fixtures'
 import type { TitleDetail } from '@/louk/api'
 
+vi.mock('@/louk/overrides', async (orig) => ({
+  ...(await orig<typeof import('@/louk/overrides')>()),
+  getCandidates: vi.fn(),
+}))
+
 vi.mock('@/louk/api', async (orig) => ({
   ...(await orig<typeof import('@/louk/api')>()),
   getTitle: vi.fn(),
@@ -16,6 +21,7 @@ vi.mock('@/louk/api', async (orig) => ({
 }))
 
 import { fetchImageBlob, getTitle, purgeImageVariant, purgeTitle, refetchTitle } from '@/louk/api'
+import { getCandidates } from '@/louk/overrides'
 import TitleView from '@/louk/views/TitleView.vue'
 
 // Dialogs render in a portal in the real app; inline them so the test can see them.
@@ -85,10 +91,38 @@ describe('TitleView', () => {
     expect(fetchImageBlob).toHaveBeenCalledWith('/api/admin/posters/imdb/tt0944947@ir.pbc.zm/image')
     expect(wrapper.findAll('[data-testid="image-tile"]')).toHaveLength(2)
     expect(wrapper.text()).toContain('No logos cached')
-    // overrides are placeholders until P3
+    // the override buttons are live (P3.3)
     const overrides = wrapper.findAll('button').filter((b) => b.text().includes('Override'))
     expect(overrides.length).toBeGreaterThan(0)
-    expect(overrides.every((b) => b.attributes('disabled') !== undefined)).toBe(true)
+    expect(overrides.every((b) => b.attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('opens the override picker for a kind and for one episode', async () => {
+    vi.mocked(getCandidates).mockReset().mockResolvedValue({
+      media_type: 'tv', tmdb_id: 1399, kind: 'logo', season: null, episode: null, lang: 'en',
+      current: null, auto: null, candidates: [], errors: [],
+    })
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    await wrapper.find('[data-testid="override-logo"]').trigger('click')
+    await flushPromises()
+    expect(getCandidates).toHaveBeenLastCalledWith({ mediaType: 'tv', tmdbId: 1399, kind: 'logo' }, undefined)
+    expect(wrapper.find('[data-testid="override-picker"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Override the logo')
+
+    // close it again (Cancel), then the second episode of season 1
+    await buttonByText(wrapper, 'Cancel').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="override-picker"]').exists()).toBe(false)
+    const ep = wrapper.findAll('[data-testid="episode"]')[1]!
+    await ep.find('[data-testid="override-episode"]').trigger('click')
+    await flushPromises()
+    expect(getCandidates).toHaveBeenLastCalledWith(
+      { mediaType: 'tv', tmdbId: 1399, kind: 'episode', season: 1, episode: 2 },
+      undefined,
+    )
+    expect(wrapper.text()).toContain('season 1 episode 2 (The Kingsroad)')
   })
 
   it('shows an unresolved title by its id', async () => {

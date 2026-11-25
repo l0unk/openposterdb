@@ -87,15 +87,16 @@ New admin pages in `web/src/louk/`, built with the existing shadcn-vue component
 - Re-fetch draws what is not cached yet with the global settings (it does not replace cached images;
   purge first for that). Purge and re-fetch can cost a few MDBList/OMDb lookups, like the existing
   buttons; the confirmation dialogs say so. Episode stills are not re-fetched per title.
-- "Override (coming)" buttons are disabled placeholders for the per-title overrides (P3).
+- "Override" buttons (per kind, and per episode in the season list) open the art picker, see
+  "Using the picker" under Per-title overrides.
 
 ### Per-title overrides
 
 Swap the art of one title (poster, logo, backdrop, or one episode still) for any other TMDB image
 (all languages), a fanart.tv image or an uploaded file, and optionally turn its rating badges off.
 This fixes cases like *The Man in the High Castle*, where upstream picks the last of three equal
-English logos. The API is in [api.md](../api.md#per-title-overrides-fork-only-admin); the picker UI
-on the title page is a separate task (P3.3).
+English logos. The API is in [api.md](../api.md#per-title-overrides-fork-only-admin); the picker is on
+the title page (below).
 
 - **Key:** the resolved title (`movie`/`tv` + TMDB id), the kind, season/episode for stills and an
   optional request language (posters and logos). imdb, tmdb and tvdb requests of a title all hit the
@@ -131,6 +132,30 @@ on the title page is a separate task (P3.3).
   them up. Code `api/src/louk/overrides/`; tests `api/tests/louk_overrides_{api,render}.rs`.
 - **Upstream PR seam:** only `overrides::purge::alias_targets` reads the title index
   (`louk::titles`); a port without the index replaces that one function.
+
+#### Using the picker
+
+1. Open the title (Library, click the poster). Next to Posters, Backdrops or Logos click **Override**; for
+   an episode still click **Override** on the episode's row in the season list.
+2. The dialog asks TMDB and fanart.tv for every image of that kind (a few seconds) and shows them as
+   thumbnails with the source, the language, the votes (TMDB) or likes (fanart), and the pixel size.
+   The badge **Automatic pick** marks what the server chooses on its own; **Current override** marks
+   what is set now. Use the Language and Source filters to narrow the list. A logo can be white on
+   transparent: switch the backing (Checks, Dark, Light) to see it.
+3. Click a thumbnail. The top of the dialog shows **Served now** (the image as it is drawn today) next
+   to **After** (the chosen art). Press **Use this logo** (or poster, backdrop, episode still) to save.
+4. **Upload your own** (or drop a file on the dialog): PNG, JPEG or WebP, at most 15 MB. The file is
+   checked in the browser first; if the server refuses it (for example more than 8000 px per side), its
+   message is shown. A good upload is selected for you; press the save button to use it.
+5. **No rating badges** turns the badges off for this one image. With nothing else picked it keeps the
+   automatic art and only removes the badges. **Applies to** (posters and logos) limits the override to
+   one request language; the default is every language.
+6. **Clear override** goes back to the automatic pick, badges included.
+
+After a change the cached renders of that image are removed and the title page says so; the image is
+drawn again on its next request (the banner has **Draw it now** for posters, backdrops and logos; it
+can cost a few rating lookups, like Re-fetch). Apps show the new art once their own caches expire.
+Unused uploads stay on disk (see the limits above).
 
 ### Production setting
 
