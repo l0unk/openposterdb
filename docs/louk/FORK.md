@@ -57,6 +57,49 @@ use it.
 - Always on; it changes no image, cache key or response. Tables: `louk_titles`,
   `louk_title_aliases`, `louk_episodes`.
 
+### Per-title overrides
+
+Swap the art of one title (poster, logo, backdrop, or one episode still) for any other TMDB image
+(all languages), a fanart.tv image or an uploaded file, and optionally turn its rating badges off.
+This fixes cases like *The Man in the High Castle*, where upstream picks the last of three equal
+English logos. The API is in [api.md](../api.md#per-title-overrides-fork-only-admin); the picker UI
+on the title page is a separate task (P3.3).
+
+- **Key:** the resolved title (`movie`/`tv` + TMDB id), the kind, season/episode for stills and an
+  optional request language (posters and logos). imdb, tmdb and tvdb requests of a title all hit the
+  same override. **Value:** a TMDB `file_path`, a fanart image (id + URL), an upload (sha256), or
+  `auto` (keep the automatic art), plus a "no badges" flag.
+- **Render:** applied before upstream's TMDB-vs-fanart choice on every path (normal,
+  `ENABLE_CDN_REDIRECTS`, `EXTERNAL_CACHE_ONLY`, background refresh, posters without a TMDB poster).
+  Badges are drawn on top unless "no badges" is set; that flag works by rendering with ratings limit 0,
+  so the image gets upstream's badge-free cache key and no rating lookup is made for it. If the
+  override's image cannot be fetched or decoded, the automatic art is served and a warning logged.
+- **Without an override nothing changes:** the table is loaded into memory once; a lookup is a hash
+  probe (no database query, no network, no error path), and with no row the hooks return their
+  input unchanged, so cache keys and bytes stay upstream's. Titles with an override keep upstream's
+  cache keys too; the purge below is what makes the new art appear. With `image_source=fanart`, a
+  poster with an override skips the fanart branch, so it is cached under the TMDB-variant key and
+  such requests always take the slow path (resolution and ratings are still cached in memory).
+- **Purge on change:** setting, changing or clearing an override runs upstream's per-title purge
+  (`purge_title`: disk files of every settings suffix, `image_meta`, `available_ratings`,
+  `image_mem_cache`, `image_inflight`, `id_cache`) for every id the title is known under: the
+  canonical `tmdb/movie-N`/`tmdb/series-N`, its imdb and tvdb ids, every alias in the title index
+  (requested ids and the cross-id copies upstream writes) and every alias with cached renders of that
+  kind; for stills only the ids of that episode. Pending index entries are flushed first, so an id
+  requested seconds ago is included. `preview_cache` is not touched: it only holds the settings
+  previews drawn from a bundled sample image, never title art. CDN copies cannot be purged from here
+  (production has the CDN off).
+- **Uploads:** `POST /api/admin/louk/uploads` with the file as the raw body. PNG, JPEG or WebP by
+  magic bytes (content type and name are ignored), at most 15 MiB (enforced while reading), at most
+  8000 px per side (checked from the header before decoding), fully decoded under decoder limits.
+  Stored as `db/uploads/<sha256>.<png|jpg|webp>`, written to a temp file and renamed; only 64-char hex
+  names are ever used as paths. Served back only through the admin route
+  `/api/admin/louk/uploads/<sha256>`. Uploads are never deleted automatically.
+- **Where it lives:** table `louk_overrides` and `db/uploads/`, both inside `./db`, so Backrest backs
+  them up. Code `api/src/louk/overrides/`; tests `api/tests/louk_overrides_{api,render}.rs`.
+- **Upstream PR seam:** only `overrides::purge::alias_targets` reads the title index
+  (`louk::titles`); a port without the index replaces that one function.
+
 ### Production setting
 
 Production sets one thing: `BACKDROP_MAX_WIDTH=1920`. Louk approved the 1920 px cap on 2026-11-25.
@@ -116,13 +159,23 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/image/serve.rs:452` | `resolve_with_ratings`, after `id::resolve`: `louk::titles::note_resolved` notes the id and what it resolved to (before the episode uplift, so episode ids keep season/episode). In-memory only. | low |
 | `api/src/image/serve.rs:460` | Inside the episode uplift: `note_cross_ids` notes the show ids upstream also caches the render under. | low |
 | `api/src/image/serve.rs:713` | `handle_inner` (posters), after `validate_id_value`: `louk::titles::touch` notes the request time. In-memory only. | low |
-| `api/src/image/serve.rs:1699` | `handle_episode_inner`: same `touch`. | low |
-| `api/src/image/serve.rs:1815` | `handle_logo_backdrop_inner`: same `touch`. | low |
-| `api/src/image/serve.rs:1203` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
-| `api/src/image/serve.rs:1642` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
-| `api/src/image/serve.rs:1870` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
-| `api/src/image/serve.rs:1908` | Slow path of the same function: same added line. | low |
-| `api/src/image/serve.rs:2046` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:1706` | `handle_episode_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1824` | `handle_logo_backdrop_inner`: same `touch`. | low |
+| `api/src/image/serve.rs:1208` | `trigger_logo_backdrop_refresh`: the backdrop arm of the `(width, badge scale)` match calls `backdrop_cap::render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:1649` | `try_tmdb_logo_backdrop`: the TMDB size comes from `backdrop_cap::tmdb_size`. Replaces 1 upstream line. | medium |
+| `api/src/image/serve.rs:1880` | Fast path of `handle_logo_backdrop_inner`: one added line splices the `.mw<N>` token into the cache suffix. | low |
+| `api/src/image/serve.rs:1919` | Slow path of the same function: same added line. | low |
+| `api/src/image/serve.rs:2058` | Generation closure: the backdrop arm calls `render_dims`. Replaces 4 upstream lines with 1. | medium |
+| `api/src/image/serve.rs:718` | `handle_inner`, before the fast path: `overrides::apply::badge_limit_hint` sets the poster ratings limit to 0 for a "no badges" override (only when such a row exists, and only from `id_cache`). | low |
+| `api/src/image/serve.rs:791,792` | `handle_inner`, after `resolve_with_ratings`: the same with the resolved title (`badge_limit`), and `use_fanart` is shadowed to false when an override replaces the art, so the fanart branch is skipped. | low |
+| `api/src/image/serve.rs:1159` | `trigger_logo_backdrop_refresh`: `strip_badges` after the badges are computed (the refresh gets the unmodified settings). | low |
+| `api/src/image/serve.rs:1166,1167` | `trigger_logo_backdrop_refresh`: `source_bytes` of the override; the `if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { b } else if fanart_is_primary`. | medium (edits an upstream line) |
+| `api/src/image/serve.rs:1231` | First line of `generate_episode`: `render_episode` draws the still from the override and returns early. | low |
+| `api/src/image/serve.rs:1327` | First line of `generate_poster_with_source`: `render_poster` draws the poster from the override and returns early (before the TMDB-vs-fanart chain and the "no poster_path" error). | low |
+| `api/src/image/serve.rs:1455` | `fetch_fanart_images` made `pub(crate)` for the override candidates. | low (same line as upstream's signature) |
+| `api/src/image/serve.rs:1711,1761` | `handle_episode_inner`: `badge_limit_hint` before the fast path, `badge_limit` after the episode check. | low |
+| `api/src/image/serve.rs:1833,1904` | `handle_logo_backdrop_inner`: the same two lines, shadowing `type_ratings_limit`. | low |
+| `api/src/image/serve.rs:2000,2001` | Logo/backdrop generation closure: `source_bytes`; the `let (primary, fallback) = if fanart_is_primary` line becomes `if let Some(b) = louk_bytes { (Some(b), None) } else if fanart_is_primary`. | medium (edits an upstream line) |
 | `api/src/handlers/image.rs:528` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
 | `api/src/handlers/preview.rs:306` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
 | `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
@@ -140,7 +193,7 @@ Also changed, without a marker (documentation, easy to merge):
 | File | Change |
 | --- | --- |
 | `docs/configuration.md` | A "Fork-only (loukdekker.nl)" section appended at the end. |
-| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`; a "Title dashboard (fork-only, admin)" section appended at the end. |
+| `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`; "Title dashboard (fork-only, admin)" and "Per-title overrides (fork-only, admin)" sections appended at the end. |
 
 `Cargo.toml` and `Cargo.lock` are unchanged: the app still reports version `1.3.0`. The git tag
 carries the fork version. That keeps the most conflict-prone files out of the diff.
@@ -158,6 +211,8 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/titles.rs` | Title index: hooks, flush, details/backfill workers, queries shared with P3 (`aliases_for_title`). |
 | `api/src/louk/handlers.rs`, `routes.rs` | Title dashboard admin endpoints. |
 | `api/tests/louk_titles.rs` | Tests for the index, the endpoints and the rollback check (`upstream_schema_opens_fork_db`). |
+| `api/src/louk/overrides/` | Per-title overrides: `store.rs` (table + in-memory map), `uploads.rs`, `candidates.rs`, `apply.rs` (render-path hooks), `purge.rs`, `handlers.rs`. The table SQL is listed in `louk/schema.rs`; the store hangs off `LoukState`. |
+| `api/tests/louk_overrides_api.rs`, `louk_overrides_render.rs` | Override API, upload and store tests; render-path and purge tests. |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 
@@ -217,8 +272,9 @@ Production pins the full tag (`ghcr.io/l0unk/openposterdb:v1.3.0-louk.1`), never
 
 Everything stateful is in `./db` (SQLite: API keys and settings), which Backrest backs up. The title
 dashboard adds three tables there (`louk_titles`, `louk_title_aliases`, `louk_episodes`); they can be
-rebuilt from traffic and the backfill, so losing them only empties the library for a while. When
-overrides and uploads arrive (not built yet), they will live in `./db` too.
+rebuilt from traffic and the backfill, so losing them only empties the library for a while. Per-title
+overrides are the table `louk_overrides` and the files in `db/uploads/`; both are in `./db`, so
+Backrest backs them up, and restoring `./db` restores them together.
 
 The `cache` volume holds the rendered images. It is not backed up and does not need to be: every
 file is made again on request.
@@ -232,7 +288,8 @@ file is made again on request.
 
 Why it is safe:
 
-- The fork's only schema change is three new tables with a `louk_` prefix (title dashboard). Upstream
+- The fork's only schema change is four new tables with a `louk_` prefix (title dashboard and
+  `louk_overrides`) plus the `db/uploads/` folder. Upstream
   does not know them and leaves them alone; no upstream table or column changes. Nothing in `./db`
   needs restoring for this rollback.
 - The `.mw1920` cache files are new names that upstream never builds. It ignores them. They only take
@@ -249,7 +306,7 @@ Why it is safe:
 | --- | --- | --- |
 | **Memory measurements and allocator (P1.4 to P1.7)** | **No numbers exist.** The release build that was meant to measure them was interrupted on 2026-11-25 by a memory stall on the dev box (a cargo release build and a frontend build ran together under a small memory limit; the box thrashed for 5 hours). The load harness is ready in `scripts/louk/` (its self-test passes against a stub; it has never run against a real binary). The `BACKDROP_MAX_WIDTH` change is in, but its effect on peak memory is **not measured**. No allocator (mimalloc/jemalloc) is built in, `MALLOC_ARENA_MAX` is untested, and the in-flight render cache is not bounded. | One release build with `-j1`, then the runs A to D. Exact procedure in [memory.md](memory.md). A local branch `louk/p1-4` in the dev-box clone has the source at that point; it has the same content as `main`, so nothing is lost. |
 | **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`. The backend (title index, admin endpoints, rollback test) is on branch `louk/p2-1`. Not merged, not in any release. | Merge both after a local smoke run against a real instance (check the library fills, names arrive, a show page lists seasons). |
-| **Per-title overrides and uploads, and the upstream PR (P3)** | Not started. The design is written down (key = resolved title + image kind, value = TMDB path, Fanart image or upload; admin only). The wrong-logo case (The Man in the High Castle: three logos with 0 votes, upstream picks the last of equal ones) is not fixed. | Build after the dashboard, then prepare the branch `pr/per-title-overrides` from upstream `main` for Louk to open on GitHub. |
+| **Per-title overrides and uploads, and the upstream PR (P3)** | Backend done on branch `louk/p3` (store, uploads, candidates, render hooks, purge; see "Per-title overrides"). Not merged, not in any release, not yet run against a real instance. No picker UI yet, and no upstream PR branch. | Picker on the title page (P3.3); a smoke run (set the High Castle logo, check all three ids); then `pr/per-title-overrides` from upstream `main` (P3.4). |
 | **New badge styles (P4)** | Not started. | Design 3 to 5 styles, each an option next to the existing `badge_style`, default unchanged. |
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |
 | **Safe-area preset in code (P5)** | **Documentation only, by decision.** The existing settings already express a safe area, so no preset and no crop overlay was built. | Louk sets one or two fields per key by hand (see "Backdrop safe areas"). |

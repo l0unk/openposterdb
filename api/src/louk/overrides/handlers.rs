@@ -180,6 +180,7 @@ pub async fn put_override(
         updated_at: chrono::Utc::now().timestamp(),
     };
     store(&state).set(&state.db, &key, &ov).await?;
+    let purge = super::purge::purge_for(&state, &key).await;
     tracing::info!(
         media_type = key.media_type,
         tmdb_id = key.tmdb_id,
@@ -187,7 +188,9 @@ pub async fn put_override(
         source = ov.source.name(),
         "louk override set"
     );
-    Ok(Json(json!({ "override": override_out(&key, &ov) })))
+    Ok(Json(
+        json!({ "override": override_out(&key, &ov), "purge": purge }),
+    ))
 }
 
 pub async fn delete_override(
@@ -197,15 +200,18 @@ pub async fn delete_override(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let key = key_from(&media_type, &tmdb_id, &kind, &q)?;
     let deleted = store(&state).clear(&state.db, &key).await?;
-    if deleted {
+    let purge = if deleted {
         tracing::info!(
             media_type = key.media_type,
             tmdb_id = key.tmdb_id,
             kind = key.kind.label(),
             "louk override cleared"
         );
-    }
-    Ok(Json(json!({ "deleted": deleted })))
+        Some(super::purge::purge_for(&state, &key).await)
+    } else {
+        None
+    };
+    Ok(Json(json!({ "deleted": deleted, "purge": purge })))
 }
 
 // ---------------------------------------------------------------------------

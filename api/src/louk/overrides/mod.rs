@@ -15,8 +15,10 @@
 //! Nothing here depends on the title dashboard (`louk::titles`) except
 //! `purge::alias_targets`, the one seam the upstream port replaces.
 
+pub mod apply;
 pub mod candidates;
 pub mod handlers;
+pub mod purge;
 pub mod store;
 pub mod uploads;
 
