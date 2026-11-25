@@ -71,6 +71,33 @@ describe('louk api', () => {
     ])
   })
 
+  it('purgeTitle and refetchTitle throw the backend message when the body says ok:false', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(res(200, { ok: false, errors: ['imdb/tt1 poster: disk error', 'tmdb/movie-1 logo: boom'] }))
+        .mockResolvedValueOnce(
+          res(200, {
+            ok: false,
+            results: [
+              { kind: 'poster', ok: true, error: null },
+              { kind: 'logo', ok: false, error: 'no logo on TMDB' },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(res(200, { ok: true, results: [] })),
+    )
+    await expect(purgeTitle('movie', 1)).rejects.toThrow('imdb/tt1 poster: disk error; tmdb/movie-1 logo: boom')
+    await expect(refetchTitle('movie', 1)).rejects.toThrow('logo: no logo on TMDB')
+    await expect(refetchTitle('movie', 1, 'logo')).resolves.toBeUndefined()
+  })
+
+  it('getTitle gives up after the timeout with an explanation', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    await expect(getTitle('tv', 1399, 20)).rejects.toThrow('still busy with this title')
+  })
+
   it('resolveAlias returns the target, null on 404 and throws on other errors', async () => {
     const fetchMock = vi
       .fn()

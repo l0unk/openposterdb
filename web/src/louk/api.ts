@@ -66,6 +66,8 @@ export interface SeasonEntry {
 
 export interface TitleDetail extends TitleSummary {
   tvdb_id?: number | null
+  /** null: details not fetched yet; negative: the last TMDB details fetch failed (retried after a day). */
+  resolved_at?: number | null
   aliases: TitleAlias[]
   images: TitleImage[]
   /** Only present for shows. */
@@ -129,8 +131,31 @@ export async function listTitles(params: TitleListParams = {}): Promise<TitleLis
   return res.json()
 }
 
-export async function getTitle(mediaType: MediaType, tmdbId: number | string): Promise<TitleDetail> {
-  const res = await expectOk(await get(`${BASE}/${mediaType}/${tmdbId}`))
+/** A show page can take a long time the first time it is opened (the server fetches episode names from TMDB). */
+export const TITLE_TIMEOUT_MS = 90_000
+
+/** Rejects when `promise` has not settled after `ms`; the request itself is left to finish on the server. */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms)
+  })
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer))
+}
+
+const seg = (v: number | string) => encodeURIComponent(String(v))
+
+export async function getTitle(
+  mediaType: MediaType,
+  tmdbId: number | string,
+  timeoutMs: number = TITLE_TIMEOUT_MS,
+): Promise<TitleDetail> {
+  const res = await withTimeout(
+    get(`${BASE}/${mediaType}/${seg(tmdbId)}`),
+    timeoutMs,
+    "The server is still busy with this title. A show's episode names are fetched from TMDB the first time it is opened; try again in a moment.",
+  )
+  await expectOk(res)
   return res.json()
 }
 
@@ -142,19 +167,49 @@ export async function resolveAlias(idType: string, idValue: string): Promise<Ali
   return res.json()
 }
 
-/** Purges every cached image of the title, under every id it was requested by. */
-export async function purgeTitle(mediaType: MediaType, tmdbId: number | string): Promise<void> {
-  await expectOk(await post(`${BASE}/${mediaType}/${tmdbId}/purge`))
+/** Body of a 200 response, or `{}` when it is not JSON. */
+async function bodyOf(res: Response): Promise<Record<string, unknown>> {
+  try {
+    const body = await res.json()
+    return body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
 }
 
-/** Re-renders cached images of the title: one kind, or every kind when `kind` is left out. */
+/**
+ * Purges every cached image of the title, under every id it was requested by.
+ * The backend answers 200 with `ok: false` and an `errors` list when some ids failed.
+ */
+export async function purgeTitle(mediaType: MediaType, tmdbId: number | string): Promise<void> {
+  const res = await expectOk(await post(`${BASE}/${mediaType}/${seg(tmdbId)}/purge`))
+  const body = await bodyOf(res)
+  if (body.ok === false) {
+    const errors = Array.isArray(body.errors) ? body.errors.filter((e) => typeof e === 'string') : []
+    throw new Error(errors.length ? errors.join('; ') : 'Some images could not be purged')
+  }
+}
+
+/**
+ * Renders the title's images that are not cached yet: one kind, or poster, logo and backdrop when `kind` is
+ * left out. Episode stills are not part of this (the backend answers 400); they are re-fetched per episode.
+ * The backend answers 200 with `ok: false` and per-kind results when some kinds failed.
+ */
 export async function refetchTitle(
   mediaType: MediaType,
   tmdbId: number | string,
-  kind?: ImageKind,
+  kind?: Exclude<ImageKind, 'episode'>,
 ): Promise<void> {
   const qs = kind ? `?kind=${kind}` : ''
-  await expectOk(await post(`${BASE}/${mediaType}/${tmdbId}/refetch${qs}`))
+  const res = await expectOk(await post(`${BASE}/${mediaType}/${seg(tmdbId)}/refetch${qs}`))
+  const body = await bodyOf(res)
+  if (body.ok === false) {
+    const results = Array.isArray(body.results) ? (body.results as Record<string, unknown>[]) : []
+    const failed = results
+      .filter((r) => r && r.ok === false)
+      .map((r) => `${String(r.kind)}: ${typeof r.error === 'string' && r.error ? r.error : 'failed'}`)
+    throw new Error(failed.length ? failed.join('; ') : 'Some images could not be fetched')
+  }
 }
 
 /** Loads one cached image (needs the bearer token, so it cannot be an <img src>). */

@@ -154,9 +154,9 @@ function clearFilters() {
         <template v-else>
           <p class="font-medium">No titles yet</p>
           <p class="max-w-md text-sm text-muted-foreground">
-            A title shows up here the first time an image is requested for it. Images that were already cached
-            before this page existed are indexed in the background, a few at a time, so older titles appear
-            gradually over the next hours.
+            A new title appears here within about a minute of the first image request for it. Titles that were
+            already cached before this page existed are indexed in the background (about 7,200 ids a day), so
+            older titles appear over the first day.
           </p>
         </template>
       </div>
@@ -171,6 +171,9 @@ function clearFilters() {
             <TitleCard :title="t" />
           </li>
         </ul>
+        <p v-if="data.total < LIBRARY_PAGE_SIZE && !filtered" class="text-xs text-muted-foreground" data-testid="library-hint">
+          Titles cached before an upgrade are added over the first day; new requests appear within about a minute.
+        </p>
         <div class="flex items-center justify-between border-t pt-4">
           <p class="text-sm text-muted-foreground" aria-live="polite">
             {{ data.total }} {{ data.total === 1 ? 'title' : 'titles' }}
