@@ -108,8 +108,9 @@ describe('LibraryView', () => {
     vi.mocked(listTitles).mockResolvedValue({ items: [], total: 0 })
     const { wrapper } = await mountView()
     const empty = wrapper.find('[data-testid="library-empty"]')
-    expect(empty.text()).toContain('first time an image is requested')
+    expect(empty.text()).toContain('within about a minute')
     expect(empty.text()).toContain('indexed in the background')
+    expect(empty.text()).toContain('over the first day')
   })
 
   it('offers to clear the filters when nothing matches', async () => {

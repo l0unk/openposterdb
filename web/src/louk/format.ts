@@ -2,6 +2,7 @@
 
 /** "just now", "5m ago", "3h ago", "12d ago" for a unix-seconds timestamp. */
 export function relativeTime(epochSeconds: number, nowMs: number = Date.now()): string {
+  if (!epochSeconds) return '—' // 0 = never requested (rows created by the index only)
   const diff = nowMs / 1000 - epochSeconds
   if (diff < 60) return 'just now'
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`

@@ -142,6 +142,63 @@ describe('TitleView', () => {
     expect(wrapper.find('[data-testid="banner"]').attributes('role')).toBe('alert')
   })
 
+  it('has no episode re-fetch button and warns about rating lookups in both dialogs', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    const episodes = wrapper.find('#sec-episodes').element.closest('section')!
+    expect(Array.from(episodes.querySelectorAll('button')).some((b) => b.textContent?.includes('Re-fetch'))).toBe(false)
+
+    await buttonByText(wrapper, 'Purge all').trigger('click')
+    expect(wrapper.find('[role="dialog"]').text()).toContain('MDBList/OMDb quota')
+    await buttonByText(wrapper, 'Cancel').trigger('click')
+
+    await buttonByText(wrapper, 'Re-fetch all').trigger('click')
+    const text = wrapper.find('[role="dialog"]').text()
+    expect(text).toContain('MDBList/OMDb quota')
+    expect(text).toContain('that are not cached')
+  })
+
+  it('shows the backend message when a purge reports ok:false', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    vi.mocked(purgeTitle).mockRejectedValue(new Error('imdb/tt0944947 poster: disk error'))
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    await buttonByText(wrapper, 'Purge all').trigger('click')
+    await wrapper.find('[data-testid="confirm-run"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="dialog"]').text()).toContain('disk error')
+    expect(wrapper.find('[data-testid="banner"]').attributes('role')).toBe('alert')
+  })
+
+  it('shows the header and the TMDB wait message while a show loads, then the retry on failure', async () => {
+    let fail!: (e: Error) => void
+    vi.mocked(getTitle)
+      .mockImplementationOnce(() => new Promise((_, reject) => (fail = reject)))
+      .mockImplementationOnce(() => new Promise(() => {}))
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    expect(wrapper.find('h1').text()).toBe('tmdb 1399')
+    expect(wrapper.find('[data-testid="loading-note"]').text()).toContain('Fetching episode names from TMDB')
+
+    fail(new Error('still busy'))
+    await flushPromises()
+    expect(wrapper.find('[data-testid="loading-note"]').exists()).toBe(false)
+    expect(wrapper.find('[role="alert"]').text()).toContain('still busy')
+
+    await buttonByText(wrapper, 'Try again').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="loading-note"]').exists()).toBe(true)
+  })
+
+  it('does not show the TMDB wait message for a movie', async () => {
+    vi.mocked(getTitle).mockImplementation(() => new Promise(() => {}))
+    const wrapper = await mountView('/admin/library/movie/603')
+    expect(wrapper.find('h1').text()).toBe('tmdb 603')
+    expect(wrapper.find('[data-testid="loading-note"]').exists()).toBe(false)
+  })
+
   it('shows an error with a retry', async () => {
     vi.mocked(getTitle).mockRejectedValueOnce(new Error('not found')).mockResolvedValue(showDetail())
     const wrapper = await mountView('/admin/library/tv/999')

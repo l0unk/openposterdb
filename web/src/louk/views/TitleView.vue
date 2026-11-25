@@ -59,6 +59,9 @@ const { data, isPending, isFetching, isError, error, refetch } = useQuery({
   retry: false,
 })
 
+// Also while "Try again" is running, so the page never looks frozen on a slow first open of a show.
+const loading = computed(() => isPending.value || (isError.value && isFetching.value && !data.value))
+
 const label = computed(() => (data.value ? titleLabel(data.value) : ''))
 const resolved = computed(() => !!data.value?.name?.trim())
 const isShow = computed(() => data.value?.media_type === 'tv')
@@ -140,6 +143,7 @@ async function runConfirm() {
   } catch (e) {
     confirmError.value = e instanceof Error ? e.message : 'The request failed'
     say(false, `${c.title} failed: ${confirmError.value}`)
+    await reload() // part of the work may have been done
   } finally {
     confirmBusy.value = false
   }
@@ -162,7 +166,7 @@ function askPurgeTitle() {
   const n = t.aliases.length
   ask({
     title: 'Purge all images',
-    body: `Removes every cached image of ${label.value}, under all ${n} ${n === 1 ? 'id' : 'ids'} it was requested by. They are generated again on the next request.`,
+    body: `Removes every cached image of ${label.value}, under all ${n} ${n === 1 ? 'id' : 'ids'} it was requested by. They are generated again on the next request. ${RATINGS_NOTE}`,
     label: 'Purge all',
     destructive: true,
     run: () => purgeTitle(t.media_type, t.tmdb_id),
@@ -172,13 +176,18 @@ function askPurgeTitle() {
 
 const kindPlural: Record<ImageKind, string> = { poster: 'posters', backdrop: 'backdrops', logo: 'logos', episode: 'episodes' }
 
-function askRefetch(kind?: ImageKind) {
+// Both the purge and the re-fetch dialogs say this: it mirrors upstream's own purge/fetch buttons.
+const RATINGS_NOTE =
+  'Drawing images again can cost a few rating lookups (MDBList/OMDb quota), the same as the other purge and re-fetch buttons in the dashboard.'
+
+// Episode stills are not re-fetched per title (the backend refuses it), so there is no 'episode' here.
+function askRefetch(kind?: Exclude<ImageKind, 'episode'>) {
   const t = data.value
   if (!t) return
   const what = kind ? kindPlural[kind] : 'images'
   ask({
     title: `Re-fetch ${what}`,
-    body: `Downloads the ${what} of ${label.value} again and renders them with the current settings.`,
+    body: `Draws the ${what} of ${label.value} that are not cached, using the global settings. Images that are already cached are left as they are; purge them first to draw them again. ${RATINGS_NOTE}`,
     label: 'Re-fetch',
     destructive: false,
     run: () => refetchTitle(t.media_type, t.tmdb_id, kind),
@@ -234,15 +243,30 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
       <p class="mt-1 text-sm text-muted-foreground">A title page needs a movie or show and a TMDB id.</p>
     </div>
 
-    <div v-else-if="isPending" class="space-y-6" aria-busy="true" aria-label="Loading title">
+    <div v-else-if="loading" class="space-y-6" aria-busy="true" aria-label="Loading title">
       <div class="flex gap-5">
         <Skeleton class="h-36 w-24 shrink-0 rounded-lg" />
-        <div class="flex-1 space-y-3">
-          <Skeleton class="h-7 w-1/2" />
+        <div class="min-w-0 flex-1 space-y-3">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 class="font-mono text-xl font-semibold tracking-tight text-muted-foreground">tmdb {{ tmdbId }}</h1>
+            <Badge variant="secondary">
+              <component :is="mediaType === 'tv' ? Tv : Film" aria-hidden="true" />
+              {{ mediaType === 'tv' ? 'Show' : 'Movie' }}
+            </Badge>
+          </div>
           <Skeleton class="h-4 w-1/3" />
           <Skeleton class="h-4 w-2/3" />
         </div>
       </div>
+      <p
+        v-if="mediaType === 'tv'"
+        role="status"
+        class="flex items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm"
+        data-testid="loading-note"
+      >
+        <Loader2 class="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+        <span>Fetching episode names from TMDB, the first time can take up to a minute.</span>
+      </p>
       <Skeleton class="h-48 w-full rounded-lg" />
     </div>
 
@@ -288,7 +312,12 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
             </Badge>
           </div>
           <p v-if="!resolved" class="text-sm text-muted-foreground">
-            The name and poster have not been looked up yet. They are fetched in the background; refresh in a minute.
+            <template v-if="(data.resolved_at ?? 0) < 0">
+              The last TMDB lookup for this title failed. It is tried again once a day.
+            </template>
+            <template v-else>
+              The name and poster have not been looked up yet. They are fetched in the background; refresh in a minute.
+            </template>
           </p>
           <ul class="flex flex-wrap gap-2 text-xs" aria-label="Ids">
             <li>
@@ -385,12 +414,6 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
           <Clapperboard class="size-4 text-muted-foreground" aria-hidden="true" />
           <h2 id="sec-episodes" class="font-medium">Seasons and episodes</h2>
           <span class="text-sm text-muted-foreground tabular-nums">{{ imagesOf('episode').length }} cached</span>
-          <div class="ml-auto">
-            <Button variant="outline" size="sm" @click="askRefetch('episode')">
-              <RotateCw />
-              Re-fetch
-            </Button>
-          </div>
         </div>
         <SeasonList
           v-if="data.seasons && data.seasons.length"
