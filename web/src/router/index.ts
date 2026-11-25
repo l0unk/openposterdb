@@ -109,6 +109,26 @@ const router = createRouter({
           component: () => import('@/views/EpisodesView.vue'),
           meta: { title: 'Episodes' },
         },
+        // louk-fork: title dashboard (Library, title page, alias redirect)
+        {
+          path: 'library',
+          name: 'library',
+          component: () => import('@/louk/views/LibraryView.vue'),
+          meta: { title: 'Library' },
+        },
+        {
+          path: 'library/alias/:idType/:idValue',
+          name: 'library-alias',
+          component: () => import('@/louk/views/AliasRedirect.vue'),
+          meta: { title: 'Library' },
+        },
+        {
+          path: 'library/:mediaType/:tmdbId',
+          name: 'library-title',
+          component: () => import('@/louk/views/TitleView.vue'),
+          meta: { title: 'Library' },
+        },
+        // louk-fork: end
         {
           path: 'keys',
           name: 'keys',

@@ -1,0 +1,153 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { mount, flushPromises } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
+import { createRouter, createMemoryHistory } from 'vue-router'
+import { showDetail, summary } from './fixtures'
+import type { TitleDetail } from '@/louk/api'
+
+vi.mock('@/louk/api', async (orig) => ({
+  ...(await orig<typeof import('@/louk/api')>()),
+  getTitle: vi.fn(),
+  purgeTitle: vi.fn(),
+  refetchTitle: vi.fn(),
+  purgeImageVariant: vi.fn(),
+  fetchImageBlob: vi.fn(),
+}))
+
+import { fetchImageBlob, getTitle, purgeImageVariant, purgeTitle, refetchTitle } from '@/louk/api'
+import TitleView from '@/louk/views/TitleView.vue'
+
+// Dialogs render in a portal in the real app; inline them so the test can see them.
+const stubs = {
+  Dialog: { template: '<div v-if="open"><slot /></div>', props: ['open'] },
+  DialogContent: { template: '<div role="dialog"><slot /></div>' },
+  DialogHeader: { template: '<div><slot /></div>' },
+  DialogTitle: { template: '<h2><slot /></h2>' },
+  DialogDescription: { template: '<p><slot /></p>' },
+}
+
+async function mountView(path: string) {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      { path: '/admin/library', name: 'library', component: { template: '<div />' } },
+      { path: '/admin/library/:mediaType/:tmdbId', name: 'library-title', component: TitleView },
+    ],
+  })
+  router.push(path)
+  await router.isReady()
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const wrapper = mount(TitleView, { global: { plugins: [createPinia(), router, [VueQueryPlugin, { queryClient }]], stubs } })
+  await flushPromises()
+  return wrapper
+}
+
+const buttonByText = (w: ReturnType<typeof mount>, text: string) => w.findAll('button').find((b) => b.text().includes(text))!
+
+describe('TitleView', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(getTitle).mockReset()
+    vi.mocked(purgeTitle).mockReset().mockResolvedValue()
+    vi.mocked(refetchTitle).mockReset().mockResolvedValue()
+    vi.mocked(purgeImageVariant).mockReset().mockResolvedValue()
+    vi.mocked(fetchImageBlob).mockReset().mockResolvedValue(new Blob(['x']))
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() }))
+  })
+
+  it('TitleView groups episodes by season', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    expect(vi.mocked(getTitle)).toHaveBeenCalledWith('tv', '1399')
+    expect(wrapper.find('h1').text()).toBe('Game of Thrones')
+    expect(wrapper.text()).toContain('2011')
+
+    const seasons = wrapper.findAll('[data-testid="season"]')
+    expect(seasons).toHaveLength(2)
+    expect(seasons[0]!.text()).toContain('Season 1')
+    expect(seasons[0]!.text()).toContain('1 of 2 cached')
+    expect(seasons[0]!.text()).toContain('Winter Is Coming')
+    expect(seasons[0]!.text()).toContain('The Kingsroad')
+    expect(seasons[0]!.text()).not.toContain('The North Remembers')
+    expect(seasons[1]!.text()).toContain('Season 2')
+    expect(seasons[1]!.text()).toContain('The North Remembers')
+    expect(seasons[0]!.findAll('[data-testid="episode"]')).toHaveLength(2)
+    // season 1 has an uncached episode, shown dimmed
+    expect(seasons[0]!.text()).toContain('Not cached')
+  })
+
+  it('lists poster and backdrop images and an empty logo section', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    expect(fetchImageBlob).toHaveBeenCalledWith('/api/admin/posters/imdb/tt0944947@ir.pbc.zm/image')
+    expect(wrapper.findAll('[data-testid="image-tile"]')).toHaveLength(2)
+    expect(wrapper.text()).toContain('No logos cached')
+    // overrides are placeholders until P3
+    const overrides = wrapper.findAll('button').filter((b) => b.text().includes('Override'))
+    expect(overrides.length).toBeGreaterThan(0)
+    expect(overrides.every((b) => b.attributes('disabled') !== undefined)).toBe(true)
+  })
+
+  it('shows an unresolved title by its id', async () => {
+    const t: TitleDetail = { ...summary({ tmdb_id: 77, name: null, year: null, poster_thumb_url: null, imdb_id: null }), aliases: [], images: [] }
+    vi.mocked(getTitle).mockResolvedValue(t)
+    const wrapper = await mountView('/admin/library/movie/77')
+    expect(wrapper.find('h1').text()).toBe('tmdb 77')
+    expect(wrapper.text()).toContain('have not been looked up yet')
+    expect(wrapper.find('header img').exists()).toBe(false)
+  })
+
+  it('asks for confirmation, purges every alias and reports success', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    await buttonByText(wrapper, 'Purge all').trigger('click')
+    expect(wrapper.find('[role="dialog"]').text()).toContain('all 3 ids')
+    expect(purgeTitle).not.toHaveBeenCalled()
+
+    await wrapper.find('[data-testid="confirm-run"]').trigger('click')
+    await flushPromises()
+
+    expect(purgeTitle).toHaveBeenCalledWith('tv', 1399)
+    expect(wrapper.find('[data-testid="banner"]').text()).toContain('Purged every cached image of Game of Thrones')
+    expect(vi.mocked(getTitle).mock.calls.length).toBeGreaterThan(1) // reloaded
+  })
+
+  it('purges one image variant after confirming', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    await wrapper.find('button[aria-label="Purge poster tt0944947@ir.pbc.zm"]').trigger('click')
+    await wrapper.find('[data-testid="confirm-run"]').trigger('click')
+    await flushPromises()
+
+    expect(purgeImageVariant).toHaveBeenCalledWith(expect.objectContaining({ kind: 'poster', id_type: 'imdb', cache_value: 'tt0944947@ir.pbc.zm' }))
+  })
+
+  it('reports a failed re-fetch and keeps the dialog open', async () => {
+    vi.mocked(getTitle).mockResolvedValue(showDetail())
+    vi.mocked(refetchTitle).mockRejectedValue(new Error('TMDB is unreachable'))
+    const wrapper = await mountView('/admin/library/tv/1399')
+
+    await wrapper.find('#sec-backdrop').element.closest('section')!.querySelector<HTMLButtonElement>('button')!.click()
+    await flushPromises()
+    await wrapper.find('[data-testid="confirm-run"]').trigger('click')
+    await flushPromises()
+
+    expect(refetchTitle).toHaveBeenCalledWith('tv', 1399, 'backdrop')
+    expect(wrapper.find('[role="dialog"]').text()).toContain('TMDB is unreachable')
+    expect(wrapper.find('[data-testid="banner"]').attributes('role')).toBe('alert')
+  })
+
+  it('shows an error with a retry', async () => {
+    vi.mocked(getTitle).mockRejectedValueOnce(new Error('not found')).mockResolvedValue(showDetail())
+    const wrapper = await mountView('/admin/library/tv/999')
+    expect(wrapper.find('[role="alert"]').text()).toContain('not found')
+    await buttonByText(wrapper, 'Try again').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('h1').text()).toBe('Game of Thrones')
+  })
+})
