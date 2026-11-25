@@ -111,7 +111,9 @@ fn louk_defaults_do_not_change_cache_keys() {
         let a = appearance(bg, BadgeShape::Rounded);
         assert!(render_row(&badges, &f, LabelStyle::Official, a, 1.0).is_none());
         assert!(render_vertical(&badges[0], &f, LabelStyle::Official, a, 1.0).is_none());
-        assert!(preview_samples(bg).is_none());
+        assert!(preview_samples(bg, false).is_none());
+        // With real art every look, `d` included, gets the spread samples.
+        assert!(preview_samples(bg, true).is_some());
         assert!(matches!(collapse(&badges, a), Cow::Borrowed(_)));
     }
 }
@@ -236,7 +238,7 @@ fn collapse_averages_the_shown_sources() {
 #[test]
 fn preview_samples_cover_every_source_and_all_bands() {
     for bg in FORK_LOOKS {
-        let samples = preview_samples(bg).unwrap();
+        let samples = preview_samples(bg, false).unwrap();
         assert_eq!(samples.len(), RatingSource::all_keys().len());
         for key in RatingSource::all_keys() {
             let src = RatingSource::from_key(key).unwrap();
@@ -319,7 +321,15 @@ fn score_and_mono_keep_upstreams_badge_size() {
             BadgeAppearance::default(),
             1.0,
         );
-        assert_eq!(h.dimensions(), up[0].dimensions(), "{bg:?} horizontal");
+        // Same width as upstream; Mono keeps upstream's height, Score adds
+        // the bar zone (52 content + 6 bar + 6 inset = 64).
+        assert_eq!(h.width(), up[0].width(), "{bg:?} horizontal width");
+        let expected_h = if bg == BadgeBackground::Score {
+            64
+        } else {
+            up[0].height()
+        };
+        assert_eq!(h.height(), expected_h, "{bg:?} horizontal height");
         let v = render_vertical(
             &badge,
             &f,
@@ -347,8 +357,8 @@ fn score_meter_fills_with_the_band_colour() {
         .unwrap();
         let img = &img_row[0];
         let x = (img.width() as f32 * x_share) as u32;
-        // Two rows above the bottom edge: inside the meter, clear of the hairline.
-        *img.get_pixel(x, img.height() - 3)
+        // The bar spans rows 52..58 of the 64 px badge.
+        *img.get_pixel(x, 55)
     };
     let near = |p: Rgba<u8>, c: Rgba<u8>| {
         (0..3).all(|i| (p.0[i] as i32 - c.0[i] as i32).abs() <= 40) && p.0[3] > 200
@@ -369,6 +379,83 @@ fn score_meter_fills_with_the_band_colour() {
     .unwrap();
     let img = &img_row[0];
     assert_eq!(img.get_pixel(0, 0).0[3], 0);
+    // The bar is inset from the sides (never clipped by the corner): the
+    // plate shows left of it, and the band colour starts just inside.
+    let left = *img.get_pixel(5, 55);
+    assert!(
+        left.0[..3].iter().all(|c| *c < 60),
+        "plate left of the bar: {left:?}"
+    );
+    assert!(
+        near(*img.get_pixel(14, 55), HIGH),
+        "bar starts inside the inset"
+    );
+    // ... and from the bottom edge.
+    let below = *img.get_pixel(img.width() / 4, 61);
+    assert!(
+        below.0[..3].iter().all(|c| *c < 60),
+        "plate below the bar: {below:?}"
+    );
+}
+
+#[test]
+fn letterboxd_logo_loses_its_tile_and_mono_writes_tile_glyphs() {
+    // The keyed Letterboxd logo: transparent where the dark tile was, the
+    // coloured dots kept, cropped to them (wide, not square).
+    let dots = &*LETTERBOXD_DOTS;
+    assert!(dots.width() > dots.height() * 2, "{:?}", dots.dimensions());
+    assert!(
+        dots.pixels()
+            .any(|p| p.0[3] > 200 && p.0[0] > 200 && p.0[2] < 80),
+        "orange dot kept"
+    );
+    assert!(
+        dots.pixels().all(|p| {
+            let (mx, mn) = (
+                *p.0[..3].iter().max().unwrap(),
+                *p.0[..3].iter().min().unwrap(),
+            );
+            p.0[3] < 40 || mx - mn > 25 || mx > 110
+        }),
+        "no dark tile pixels left"
+    );
+    // Mono: IMDb's tile glyph becomes text, so no big bright block remains.
+    let f = font();
+    let row = render_row(
+        &[rb(RatingSource::Imdb, "8.5")],
+        &f,
+        LabelStyle::Official,
+        appearance(BadgeBackground::Mono, BadgeShape::Rounded),
+        1.0,
+    )
+    .unwrap();
+    let img = &row[0];
+    let bright = img
+        .pixels()
+        .filter(|p| p.0[3] > 200 && p.0[..3].iter().all(|c| *c > 190))
+        .count();
+    let share = bright as f32 / (img.width() * img.height()) as f32;
+    assert!(share < 0.15, "IMDb mark is text, not a tile ({share})");
+}
+
+#[test]
+fn tiny_score_badges_drop_the_mark_and_keep_a_readable_figure() {
+    let f = font();
+    let badges = vec![
+        rb(RatingSource::Mal, "8.12"),
+        rb(RatingSource::Imdb, "6.4"),
+        rb(RatingSource::Letterboxd, "2.1"),
+    ];
+    let a = appearance(BadgeBackground::Score, BadgeShape::Rounded);
+    let tiny = render_row(&badges, &f, LabelStyle::Official, a, 0.16).unwrap();
+    // Figure at least 9 px: the badge is at least 9 * 1.45 + bar tall.
+    assert!(tiny[0].height() >= 13 + 2 + 1, "{:?}", tiny[0].dimensions());
+    // Three of them fit a 92 px poster with upstream's 2 px spacing.
+    assert!(
+        tiny.iter().map(|i| i.width()).sum::<u32>() + 4 <= 92,
+        "{:?}",
+        tiny.iter().map(|i| i.width()).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -402,11 +489,69 @@ fn mono_has_no_colour() {
     }
 }
 
+/// Bounding box of the white figure (only it has all channels above 200).
+fn bright_bbox(img: &RgbaImage) -> (u32, u32, u32, u32) {
+    let bright: Vec<(u32, u32)> = img
+        .enumerate_pixels()
+        .filter(|(_, _, p)| p.0[..3].iter().all(|c| *c > 200) && p.0[3] > 200)
+        .map(|(x, y, _)| (x, y))
+        .collect();
+    assert!(!bright.is_empty(), "figure drawn");
+    (
+        bright.iter().map(|p| p.0).min().unwrap(),
+        bright.iter().map(|p| p.1).min().unwrap(),
+        bright.iter().map(|p| p.0).max().unwrap(),
+        bright.iter().map(|p| p.1).max().unwrap(),
+    )
+}
+
 #[test]
 fn average_disc_centres_its_number() {
     let f = font();
-    for (value, scale) in [("7.8", 1.0_f32), ("10.0", 1.0), ("2.4", 2.0), ("9.1", 0.5)] {
-        let disc_row = render_row(
+    for (value, scale) in [
+        ("7.8", 1.0_f32),
+        ("10.0", 1.0),
+        ("2.4", 2.0),
+        ("9.1", 0.5),
+        ("6.0", 0.1),
+    ] {
+        let disc = render_vertical(
+            &rb(RatingSource::Imdb, value),
+            &f,
+            LabelStyle::Official,
+            appearance(BadgeBackground::Average, BadgeShape::Rounded),
+            scale,
+        )
+        .unwrap();
+        assert_eq!(disc.width(), disc.height());
+        assert_eq!(
+            disc.width(),
+            (58.0 * scale * DISC_SHARE).round().max(MIN_DISC_PX) as u32
+        );
+        let (x0, y0, x1, y1) = bright_bbox(&disc);
+        let d = disc.width() as f32;
+        let (cx, cy) = ((x0 + x1) as f32 / 2.0, (y0 + y1) as f32 / 2.0);
+        assert!(
+            (cx - d / 2.0).abs() <= d * 0.08,
+            "{value}: centred horizontally ({cx} of {d})"
+        );
+        assert!(
+            (cy - d / 2.0).abs() <= d * 0.10,
+            "{value}: centred vertically ({cy} of {d})"
+        );
+        assert!(
+            x0 as f32 > d * 0.12 && (x1 as f32) < d * 0.88,
+            "{value}: inside the ring"
+        );
+        assert_eq!(disc.get_pixel(0, 0).0[3], 0);
+    }
+}
+
+#[test]
+fn average_pill_is_row_height_with_a_large_figure() {
+    let f = font();
+    for (value, scale) in [("6.2", 1.0_f32), ("10.0", 1.0), ("4.4", 2.0), ("7.0", 0.16)] {
+        let row = render_row(
             &[rb(RatingSource::Imdb, value)],
             &f,
             LabelStyle::Official,
@@ -414,41 +559,29 @@ fn average_disc_centres_its_number() {
             scale,
         )
         .unwrap();
-        let disc = &disc_row[0];
-        assert_eq!(disc.width(), disc.height());
-        assert_eq!(disc.width(), (58.0 * scale * DISC_SHARE).round() as u32);
-        // Only the white number has all three channels above 200.
-        let bright: Vec<(u32, u32)> = disc
-            .enumerate_pixels()
-            .filter(|(_, _, p)| p.0[..3].iter().all(|c| *c > 200) && p.0[3] > 200)
-            .map(|(x, y, _)| (x, y))
-            .collect();
-        assert!(!bright.is_empty(), "{value}: number drawn");
-        let (x0, x1) = (
-            bright.iter().map(|p| p.0).min().unwrap(),
-            bright.iter().map(|p| p.0).max().unwrap(),
-        );
-        let (y0, y1) = (
-            bright.iter().map(|p| p.1).min().unwrap(),
-            bright.iter().map(|p| p.1).max().unwrap(),
-        );
-        let d = disc.width() as f32;
-        let (cx, cy) = ((x0 + x1) as f32 / 2.0, (y0 + y1) as f32 / 2.0);
+        assert_eq!(row.len(), 1);
+        let pill = &row[0];
+        let h = (64.0 * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
+        assert_eq!(pill.height(), h, "{value} {scale}");
+        assert!(pill.width() > h, "a pill, wider than tall");
+        let (x0, y0, x1, y1) = bright_bbox(pill);
+        let hf = h as f32;
+        // The figure sits right of the dial and is vertically centred.
         assert!(
-            (cx - d / 2.0).abs() <= d * 0.08,
-            "{value}: number centred horizontally ({cx} of {d})"
+            x0 as f32 >= hf * 0.75,
+            "{value}: figure right of the dial ({x0})"
         );
         assert!(
-            (cy - d / 2.0).abs() <= d * 0.10,
-            "{value}: number centred vertically ({cy} of {d})"
+            ((y0 + y1) as f32 / 2.0 - hf / 2.0).abs() <= hf * 0.10,
+            "{value}: centred ({y0}..{y1} of {h})"
         );
-        // The number stays inside the ring.
+        // Figures are at least 0.38 of the pill tall (row badges: 0.34 of 58).
         assert!(
-            x0 as f32 > d * 0.15 && (x1 as f32) < d * 0.85,
-            "{value}: number inside the ring"
+            (y1 - y0 + 1) as f32 >= hf * 0.38 || h as f32 == MIN_AVERAGE_PILL_PX,
+            "{value}: large figure ({y0}..{y1})"
         );
-        // Corners are outside the disc.
-        assert_eq!(disc.get_pixel(0, 0).0[3], 0);
+        assert!(x1 < pill.width());
+        assert_eq!(pill.get_pixel(0, 0).0[3], 0);
     }
 }
 
@@ -515,8 +648,16 @@ fn posters_render_every_look_at_card_and_tiny_sizes() {
                     "{bg:?} {width}: centred ({left} vs {right})"
                 );
                 if bg == BadgeBackground::Average {
-                    let d = (58.0 * scale * DISC_SHARE).round() as u32;
-                    assert!(x1 - x0 < d + 16, "{bg:?} {width}: one disc, not a row");
+                    let ph = (64.0 * scale).round().max(MIN_AVERAGE_PILL_PX) as u32;
+                    assert!(
+                        x1 - x0 < width * 2 / 3,
+                        "{bg:?} {width}: one pill, not a row"
+                    );
+                    // As tall as a Score row, so it sits where the row sits.
+                    assert!(
+                        y1 - y0 <= ph + 16,
+                        "{bg:?} {width}: pill height ({y0}..{y1})"
+                    );
                 }
             }
         }
@@ -526,7 +667,7 @@ fn posters_render_every_look_at_card_and_tiny_sizes() {
 #[test]
 fn backdrops_put_every_look_in_the_top_right_column() {
     let f = font();
-    let badges = preview_samples(BadgeBackground::Score).unwrap()[..5].to_vec();
+    let badges = preview_samples(BadgeBackground::Score, false).unwrap()[..5].to_vec();
     let png = solid_png(1920, 1080, [200, 200, 200]);
     let render = |bs: &[RatingBadge], a: BadgeAppearance| {
         generate::render_backdrop_sync(
@@ -558,9 +699,12 @@ fn backdrops_put_every_look_in_the_top_right_column() {
         );
         assert!((12..=28).contains(&y0), "{bg:?}: top margin {y0}");
         if bg == BadgeBackground::Average {
-            assert!(y1 < 20 + (58.0 * DISC_SHARE).round() as u32 + 12, "{bg:?}: a single disc ({y1})");
+            assert!(
+                y1 < 20 + (58.0 * DISC_SHARE).round() as u32 + 12,
+                "{bg:?}: a single disc ({y1})"
+            );
         } else {
-            assert!(y1 > 400 && y1 < 1080 / 2 + 60, "{bg:?}: five badges ({y1})");
+            assert!(y1 > 400 && y1 < 700, "{bg:?}: five badges ({y1})");
         }
     }
 }

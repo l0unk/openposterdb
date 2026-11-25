@@ -112,6 +112,8 @@ at 78 % (alpha 200).
 
 ### Average (`a`)
 
+(Tuned after the gallery: in rows it is now a pill, see "Tuning round" below; the disc is the column form.)
+
 ```
      ╭─────╮
    ╭─  7.8  ─╮      dark disc (88 %), ring track white 16 %,
@@ -131,6 +133,23 @@ at 78 % (alpha 200).
   single source to label).
 - The cache key still names the sources (`@mil…`) and the "Max ratings" value, so changing either
   redraws.
+
+## Tuning round after the real-art gallery (P4.2)
+
+The gallery rendered every look on six real titles (the darkest, brightest and busiest found) and
+screenshotted them at TV-row, phone-grid and hero size. What the pixels showed, and what changed:
+
+| Seen | Cause | Change |
+| --- | --- | --- |
+| Score: the meter read as a 2 px "swoosh" whose ends were eaten by the corners | a 5 px strip at the very bottom edge, clipped by the rounded mask | The meter is now a **bar**: its own capsule (round ends, AA), 6.4 px thick at 58, inset 5.6 px from the bottom and at least 10 px (or whatever clears the corner arc) from the sides. The filled part is a capsule too. The row badge gets a 52 px content zone plus the bar zone: 64 px tall (upstream 58), the same width. Vertical badges keep upstream's content and add the same bar zone. |
+| Score: Letterboxd's official logo showed a dark box on the plate | that logo sits on its own 48 px dark gradient tile | The tile is keyed out (dark, unsaturated pixels become transparent with a soft edge) and the logo is cropped to the three dots. Official marks now fit a 42 px box in the 52 px content zone (48 in columns). |
+| Mono: IMDb was a heavy light-grey tile with unreadable letters | upstream's IMDb and MDBList glyphs are filled tiles with knocked-out text | In Mono, those two sources are written as text ("IMDb", "MDB") in the glyphs' tone `#D6DAE0`; the open glyphs (RT, Metacritic, Letterboxd, TMDB, Trakt, …) stay, at 82 %. The plate goes from 72 % to 80 %: white figures 10.3:1 and grey text labels 4.9:1 over pure white (was 7.6 and 3.2). |
+| One score on posters sat higher than a badge row and covered title art (Godfather "PART II", Arcane's subtitle) | a 93 px disc anchored at the row's bottom margin rises 35 px above a row | In a row (posters, logos, horizontal backdrops) the look is now a **pill as tall as a Score badge** (64 px), so it occupies exactly the row's band: a 40 px score ring at the left and the figure at 0.70 of the pill (digits 27 px, row badges 20 px). The disc stays for columns (backdrop and episode defaults), where the gallery liked it. |
+| Metacritic's figure looked mid-grey in the hero screenshots, in every look and in `d` | not the badge: the raw render has a pure white "47"; the 5th badge of the column sits where the app's bottom fade starts (the gallery page reproduces that shade), which is why "Backdrop safe areas" recommends 3 ratings or One score there | No code change. Every figure in the fork looks is white (`#FFFFFF`), and the tests check the bright figure pixels. |
+| Phone grid (124 px cards): Score figures 5–6 px, the disc 17 px | the server renders a 580 px poster; the app shrinks it 4.7x. A render cannot know the card it ends up in | Within a render: below badge scale 0.45 (badge height under ~26 px, e.g. extra-small badges) Score and Mono drop the source mark and keep the figure at no less than 9 px (Average 12 px; pill at least 22 px, disc 32 px). For phone keys: One score's pill figure is 35 % taller than a row figure and alone on the card; add badge size Large or Extra large for more. |
+
+Also for comparison: previews with `art=` now draw the spread sample scores for every look, `d` included,
+so default and fork looks can be compared value for value (previews without `art` are unchanged).
 
 ## What was left out, and why
 

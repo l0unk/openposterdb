@@ -224,7 +224,7 @@ pub async fn preview_poster(
     }
 
     // 3. Render and cache to both layers
-    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let poster_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Poster, image_size, SAMPLE_POSTER_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
@@ -281,7 +281,7 @@ pub async fn preview_logo(
         return Ok(preview_png_response(bytes));
     }
 
-    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let logo_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Logo, image_size, SAMPLE_LOGO_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
@@ -344,7 +344,7 @@ pub async fn preview_backdrop(
         return Ok(preview_response(bytes));
     }
 
-    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let backdrop_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Backdrop, image_size, SAMPLE_BACKDROP_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
@@ -427,7 +427,7 @@ pub async fn preview_episode(
         return Ok(preview_response(bytes));
     }
 
-    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background, louk_art.is_some()).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks and real-art previews
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let episode_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Episode, image_size, SAMPLE_EPISODE_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:

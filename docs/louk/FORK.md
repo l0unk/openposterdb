@@ -285,7 +285,7 @@ setting, so nothing changes until you pick one. Design notes, colours and contra
 | --- | --- | --- |
 | Score colour | `s` | A dark plate with the source logo and a white number, and a bar along the bottom that fills with the score: teal for good (7 and up), amber for middling (5 to 6.9), red for weak. |
 | Mono | `m` | The same plate, lighter, with white source symbols instead of the coloured logos. No colour at all. |
-| One score (average) | `a` | One ring with the average of the shown ratings on a 0 to 10 scale; the ring fills with the score in the same colours. |
+| One score (average) | `a` | One figure: the average of the shown ratings on a 0 to 10 scale, next to a ring that fills with the score in the same colours. In a row (posters) it is a pill as tall as a Score badge; in the backdrop's right-hand column a round disc. |
 
 **Where to turn them on.** Admin → API keys → the key's settings (or Admin → Settings for every key
 that has no settings of its own) → in the **Poster**, **Logo**, **Backdrop (series/movie)** and
@@ -301,7 +301,7 @@ distance; its colours were chosen to stay apart for colour-blind viewers, and th
 the same information. On backdrops the default is a column of five badges at the top right, whose bottom
 two sit in the Home banner's dark fade (see "Backdrop safe areas"); one disc in that corner stays in
 the clean area. In phone grids no row of small badges reads, so a phone-only key would use `a` on
-posters too. These are recommendations from the design and the measurements; the gallery
+posters too, with badge size Large or Extra large. These are recommendations from the design and the measurements; the gallery
 (below) shows them on real titles and its first look did not contradict them (open tuning items are
 listed in the P4.2 report).
 
