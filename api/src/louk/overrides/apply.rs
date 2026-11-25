@@ -10,9 +10,9 @@
 use std::io::Cursor;
 use std::sync::Arc;
 
-use image::{ImageFormat, ImageReader};
+use image::{ImageFormat, ImageReader, Limits};
 
-use super::{OverrideSource, TitleOverride, store, uploads};
+use super::{OverrideKey, OverrideSource, TitleOverride, purge, store, uploads};
 use crate::AppState;
 use crate::cache::{self, ImageType};
 use crate::id::{MediaType, ResolvedId};
@@ -56,10 +56,42 @@ pub async fn find(
     kind: ImageType,
     lang: &str,
 ) -> Option<TitleOverride> {
-    let st = store(state);
-    let (media_type, tmdb_id, season, episode) = title_of(resolved, kind)?;
-    st.lookup(&state.db, media_type, tmdb_id, kind, season, episode, lang)
+    find_keyed(state, resolved, kind, lang)
         .await
+        .map(|(_, ov)| ov)
+}
+
+/// [`find`], plus the key of the row that matched.
+pub async fn find_keyed(
+    state: &AppState,
+    resolved: &ResolvedId,
+    kind: ImageType,
+    lang: &str,
+) -> Option<(OverrideKey, TitleOverride)> {
+    let (media_type, tmdb_id, season, episode) = title_of(resolved, kind)?;
+    store(state)
+        .lookup_keyed(&state.db, media_type, tmdb_id, kind, season, episode, lang)
+        .await
+}
+
+/// The override's image for this render. When an override with art cannot
+/// deliver it, the automatic art is rendered and cached under the same key,
+/// so a delayed re-purge is scheduled (once per override version).
+async fn source_for(
+    state: &AppState,
+    key: &OverrideKey,
+    ov: &TitleOverride,
+    kind: ImageType,
+    image_size: Option<ImageSize>,
+) -> Option<Vec<u8>> {
+    if ov.source == OverrideSource::Auto {
+        return None;
+    }
+    let bytes = fetch_source(state, &ov.source, kind, image_size).await;
+    if bytes.is_none() {
+        purge::note_source_failure(state, key, ov.updated_at);
+    }
+    bytes
 }
 
 /// True when an override replaces the art (any source but `auto`).
@@ -135,8 +167,8 @@ pub async fn source_bytes(
     lang: &str,
     image_size: Option<ImageSize>,
 ) -> Option<Vec<u8>> {
-    let ov = find(state, resolved, kind, lang).await?;
-    fetch_source(state, &ov.source, kind, image_size).await
+    let (key, ov) = find_keyed(state, resolved, kind, lang).await?;
+    source_for(state, &key, &ov, kind, image_size).await
 }
 
 /// Render a poster from the override's source (fork hook at the top of
@@ -150,8 +182,8 @@ pub async fn render_poster(
     settings: &RenderSettings,
     image_size: Option<ImageSize>,
 ) -> Option<Vec<u8>> {
-    let ov = find(state, resolved, ImageType::Poster, &settings.lang).await?;
-    let bytes = fetch_source(state, &ov.source, ImageType::Poster, image_size).await?;
+    let (key, ov) = find_keyed(state, resolved, ImageType::Poster, &settings.lang).await?;
+    let bytes = source_for(state, &key, &ov, ImageType::Poster, image_size).await?;
     let badges: &[RatingBadge] = if ov.no_badges { &[] } else { badges };
     let resolved_size = resolve_image_size(image_size);
     let tmdb_size: Arc<str> = resolved_size.tmdb_size().into();
@@ -183,6 +215,7 @@ pub async fn render_poster(
     match r {
         Ok(b) => Some(b),
         Err(e) => {
+            purge::note_source_failure(state, &key, ov.updated_at);
             tracing::warn!(error = %e, tmdb_id = resolved.tmdb_id, source = ov.source.name(), "louk override: poster render failed, using the automatic art");
             None
         }
@@ -199,8 +232,8 @@ pub async fn render_episode(
     settings: &RenderSettings,
     image_size: Option<ImageSize>,
 ) -> Option<Vec<u8>> {
-    let ov = find(state, resolved, ImageType::Episode, "").await?;
-    let bytes = fetch_source(state, &ov.source, ImageType::Episode, image_size).await?;
+    let (key, ov) = find_keyed(state, resolved, ImageType::Episode, "").await?;
+    let bytes = source_for(state, &key, &ov, ImageType::Episode, image_size).await?;
     let badges: Vec<RatingBadge> = if ov.no_badges {
         Vec::new()
     } else {
@@ -241,6 +274,7 @@ pub async fn render_episode(
     match r {
         Ok(Ok(b)) => Some(b),
         Ok(Err(e)) => {
+            purge::note_source_failure(state, &key, ov.updated_at);
             tracing::warn!(error = %e, source = ov.source.name(), "louk override: still render failed, using the automatic art");
             None
         }
@@ -306,6 +340,65 @@ pub fn header_ok(bytes: &[u8]) -> bool {
     }
 }
 
+/// Decoder limits of the render path (`generate.rs`: 8192² RGBA).
+pub fn decode_limits() -> Limits {
+    let mut l = Limits::default();
+    l.max_image_width = Some(8192);
+    l.max_image_height = Some(8192);
+    l.max_alloc = Some(MAX_SOURCE_PIXELS * 4);
+    l
+}
+
+/// Full decode under [`decode_limits`] (once per fresh download, under a
+/// render permit to bound memory). `None` (logged) when it fails, so a
+/// corrupt image is never cached and the automatic art is used.
+async fn fully_decodes(state: &AppState, bytes: Vec<u8>) -> Option<Vec<u8>> {
+    let _permit = state.render_semaphore.acquire().await.ok()?;
+    let checked = tokio::task::spawn_blocking(move || {
+        let ok = decodes(&bytes);
+        (bytes, ok)
+    })
+    .await;
+    match checked {
+        Ok((bytes, true)) => Some(bytes),
+        Ok((_, false)) => {
+            tracing::warn!(
+                "louk override: downloaded source does not decode, using the automatic art"
+            );
+            None
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "louk override: source decode task failed");
+            None
+        }
+    }
+}
+
+/// True when `bytes` is a PNG/JPEG/WebP that fully decodes under the render
+/// path's limits.
+pub fn decodes(bytes: &[u8]) -> bool {
+    if !header_ok(bytes) {
+        return false;
+    }
+    let Ok(mut reader) = ImageReader::new(Cursor::new(bytes)).with_guessed_format() else {
+        return false;
+    };
+    reader.limits(decode_limits());
+    reader.decode().is_ok()
+}
+
+/// A cached source, or `None` (and the file removed) when its header is no
+/// longer a usable image.
+async fn read_cached_source(path: &std::path::Path) -> Option<Vec<u8>> {
+    let entry = cache::read(path, 0).await?;
+    if header_ok(&entry.bytes) {
+        return Some(entry.bytes);
+    }
+    tracing::warn!(path = %path.display(), "louk override: removing an unusable cached source");
+    let _ = tokio::fs::remove_file(path).await;
+    None
+}
+
 /// TMDB image through the same base-image disk cache upstream uses for
 /// posters (skipped with `EXTERNAL_CACHE_ONLY`).
 async fn fetch_tmdb(state: &AppState, file_path: &str, size: &str) -> Option<Vec<u8>> {
@@ -315,12 +408,13 @@ async fn fetch_tmdb(state: &AppState, file_path: &str, size: &str) -> Option<Vec
         cache::base_poster_path(&state.config.cache_dir, file_path, size).ok()
     };
     if let Some(p) = &disk {
-        if let Some(entry) = cache::read(p, 0).await {
-            return Some(entry.bytes);
+        if let Some(bytes) = read_cached_source(p).await {
+            return Some(bytes);
         }
     }
     match state.tmdb.fetch_image_bytes(file_path, size).await {
         Ok(bytes) => {
+            let bytes = fully_decodes(state, bytes).await?;
             if let Some(p) = &disk {
                 if let Err(e) = cache::write(p, &bytes).await {
                     tracing::warn!(error = %e, "louk override: caching a TMDB source failed");
@@ -343,8 +437,8 @@ async fn fetch_fanart(state: &AppState, id: &str, url: &str, kind: ImageType) ->
         cache::base_fanart_path(&state.config.cache_dir, id, kind.ext()).ok()
     };
     if let Some(p) = &disk {
-        if let Some(entry) = cache::read(p, 0).await {
-            return Some(entry.bytes);
+        if let Some(bytes) = read_cached_source(p).await {
+            return Some(bytes);
         }
     }
     let Some(fc) = state.fanart.as_ref() else {
@@ -356,6 +450,7 @@ async fn fetch_fanart(state: &AppState, id: &str, url: &str, kind: ImageType) ->
     };
     match fc.fetch_poster_bytes(url).await {
         Ok(bytes) => {
+            let bytes = fully_decodes(state, bytes).await?;
             if let Some(p) = &disk {
                 if let Err(e) = cache::write(p, &bytes).await {
                     tracing::warn!(error = %e, "louk override: caching a fanart source failed");
@@ -413,6 +508,33 @@ mod tests {
             title_of(&ep, ImageType::Backdrop),
             Some(("tv", 1399, -1, -1))
         );
+    }
+
+    #[test]
+    fn corrupt_body_with_valid_header_does_not_decode() {
+        let img = image::RgbaImage::from_fn(64, 64, |x, y| {
+            image::Rgba([(x * 7 + y * 13) as u8, (x * y) as u8, (x ^ y) as u8, 255])
+        });
+        let mut good = Vec::new();
+        img.write_to(&mut Cursor::new(&mut good), ImageFormat::Png)
+            .unwrap();
+        assert!(decodes(&good));
+        let mut broken = good.clone();
+        broken.truncate(good.len() / 2);
+        assert!(header_ok(&broken), "the header alone looks fine");
+        assert!(!decodes(&broken));
+    }
+
+    #[tokio::test]
+    async fn unusable_cached_source_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let bad = dir.path().join("bad.png");
+        std::fs::write(&bad, b"not an image").unwrap();
+        assert!(read_cached_source(&bad).await.is_none());
+        assert!(!bad.exists());
+        let good = dir.path().join("good.png");
+        std::fs::write(&good, uploads::tests::png(4, 4)).unwrap();
+        assert!(read_cached_source(&good).await.is_some());
     }
 
     #[test]

@@ -517,11 +517,18 @@ fn spawn_season_fetch(state: &AppState, show: i64, seasons: Vec<i64>) {
     }
     let state = state.clone();
     tokio::spawn(async move {
-        for season in seasons {
-            if let Err(e) = titles::season_episodes(&state, show, season).await {
-                tracing::debug!(error = %e, show, season, "louk: background season fetch failed");
-            }
-        }
+        let job = {
+            let state = state.clone();
+            tokio::spawn(async move {
+                for season in seasons {
+                    if let Err(e) = titles::season_episodes(&state, show, season).await {
+                        tracing::debug!(error = %e, show, season, "louk: background season fetch failed");
+                    }
+                }
+            })
+        };
+        // Removed however the job ended (also after a panic).
+        let _ = job.await;
         state.louk.season_jobs.remove(&show);
     });
 }
@@ -773,6 +780,9 @@ pub async fn refetch_title(
 
     let mut results = Vec::with_capacity(kinds.len());
     for kind in kinds {
+        // With an override of this kind, purge first: a render cached before
+        // (or despite) the override is replaced instead of served again.
+        crate::louk::overrides::purge::purge_if_overridden(&state, media_type, tmdb_id, kind).await;
         let res = match kind {
             ImageType::Poster => {
                 serve::handle_inner(&state, &id_type, &id_value, (*settings).clone(), None)

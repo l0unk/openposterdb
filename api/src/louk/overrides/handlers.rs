@@ -181,6 +181,15 @@ pub async fn put_override(
     };
     store(&state).set(&state.db, &key, &ov).await?;
     let purge = super::purge::purge_for(&state, &key).await;
+    // Renders in flight during the change finish after this purge: purge
+    // again once they are surely done.
+    super::purge::schedule_repurge(&state, &key, super::purge::REPURGE_AFTER_CHANGE);
+    let shadowed_by: Vec<OverrideOut> = store(&state)
+        .shadowing(&state.db, &key)
+        .await?
+        .iter()
+        .map(|(k, o)| override_out(k, o))
+        .collect();
     tracing::info!(
         media_type = key.media_type,
         tmdb_id = key.tmdb_id,
@@ -189,7 +198,7 @@ pub async fn put_override(
         "louk override set"
     );
     Ok(Json(
-        json!({ "override": override_out(&key, &ov), "purge": purge }),
+        json!({ "override": override_out(&key, &ov), "purge": purge, "shadowed_by": shadowed_by }),
     ))
 }
 
@@ -207,7 +216,9 @@ pub async fn delete_override(
             kind = key.kind.label(),
             "louk override cleared"
         );
-        Some(super::purge::purge_for(&state, &key).await)
+        let purge = super::purge::purge_for(&state, &key).await;
+        super::purge::schedule_repurge(&state, &key, super::purge::REPURGE_AFTER_CHANGE);
+        Some(purge)
     } else {
         None
     };
@@ -218,6 +229,9 @@ pub async fn delete_override(
 // POST /api/admin/louk/uploads, GET /api/admin/louk/uploads/{sha256}
 // ---------------------------------------------------------------------------
 
+/// Pinned to axum 0.8 / http-body-util 0.1: `to_bytes` wraps
+/// `LengthLimitError`, whose text is "length limit exceeded" (tested by
+/// `upload_rejects_over_15mb`; re-check on an axum upgrade).
 fn is_length_limit(e: &axum::Error) -> bool {
     let mut src: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(e);
     while let Some(s) = src {
@@ -265,6 +279,10 @@ pub async fn upload(
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("multipart/"));
+    // Decoding a large upload can take ~256 MB: share the render permits.
+    let Ok(_permit) = state.render_semaphore.acquire().await else {
+        return json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal server error");
+    };
     match uploads::save_upload(&state.config.db_dir, bytes.to_vec()).await {
         Ok(saved) => Json(json!({
             "sha256": saved.sha256,
@@ -376,7 +394,7 @@ pub async fn list_candidates(
         None,
     )?;
     let current = store(&state)
-        .lookup(
+        .lookup_keyed(
             &state.db,
             media_type,
             tmdb_id_n,
@@ -394,26 +412,10 @@ pub async fn list_candidates(
         key.season,
         key.episode,
         &lang,
-        current.as_ref().map(|o| &o.source),
+        current.as_ref().map(|(_, o)| &o.source),
     )
     .await;
-    // `current` names the stored row; find its key (exact lang, base, any).
-    let current_out = match current {
-        Some(ov) => {
-            let rows = store(&state)
-                .list_title(&state.db, media_type, tmdb_id_n)
-                .await?;
-            rows.into_iter()
-                .find(|(k, o)| {
-                    k.kind == kind_t
-                        && k.season == key.season
-                        && k.episode == key.episode
-                        && *o == ov
-                })
-                .map(|(k, o)| override_out(&k, &o))
-        }
-        None => None,
-    };
+    let current_out = current.as_ref().map(|(k, o)| override_out(k, o));
     let ep = kind_t == ImageType::Episode;
     Ok(Json(CandidatesOut {
         media_type,
