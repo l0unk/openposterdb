@@ -17,10 +17,11 @@ Measured 2026-11-25 with the Zig toolchain on the dev box. Later phases must not
 
 ## Fork tests today
 
-On the fork branch that became `v1.3.0-louk.1` (debug `cargo test`, CI green on the branch), the suites
-are: lib 499 (upstream 474, plus 25 fork tests), `louk_backdrop_cap` 8 (new), and the upstream suites
-unchanged (preview 49, security 42, is_valid 7, middleware 7, external_cache_only 4, and the rest as
-upstream). Frontend: vitest 328, unchanged. No fork change may leave these worse.
+On `main` as released in `v1.3.0-louk.2` (its tree is identical to `louk/next` @4015b4e, which passed CI and both smoke tests as rc.4): backend lib 558
+(upstream 474, plus 84 fork tests), 993 cargo tests across all suites, 0 failed. Frontend: vitest 394 tests in
+35 files at the integration commit (@f1b4853); the later picker fixes (@4015b4e) added more specs, so
+read it as "394+" (the exact number is in the latest CI run). Playwright e2e 141. For comparison, upstream
+`v1.3.0` is cargo 474 + 49 + 42 + 7 + 7 + 4 and vitest 328 (table above). No fork change may leave these worse.
 
 ## Release-build memory baseline
 

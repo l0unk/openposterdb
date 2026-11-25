@@ -2,7 +2,7 @@
 
 This file is the owner's manual for the fork. It says what the fork is, what it adds, which settings it has,
 where to switch things on, what is not done, and how to carry it (back up, roll back, release, sync with
-upstream). It describes the integrated branch `louk/next` (2026-11-25), the successor of `v1.3.0-louk.1`.
+upstream). It describes `main` at the release `v1.3.0-louk.2` (2026-11-25), the successor of `v1.3.0-louk.1`.
 
 ## What the fork is, and why
 
@@ -513,7 +513,50 @@ Why it is safe:
   were purged, upstream draws them again at 3840 px, with the old memory cost.
 - The test `upstream_schema_opens_fork_db` runs upstream's startup schema and migrations again on a
   fork-migrated database with rows in the fork tables, then upstream queries and writes; it passes.
-  Not yet verified with a real upstream binary against a copy of the production database.
+  Verified with a real upstream `v1.3.0` binary on a copy of a fork-migrated development database (smoke test of
+  `rc.3`, see "How this release was tested"); not against a copy of the production database.
+
+## How this release was tested
+
+`v1.3.0-louk.2` was built from `main` (tree identical to `louk/next` @4015b4e, the commit of the last
+release candidate `rc.4`). The compile and test loop ran on GitHub Actions (backend 558 lib tests, 993 cargo
+tests in all suites, vitest 394+, e2e 141; see [baseline.md](baseline.md)); nothing was built locally. On top of
+that, the release-candidate binaries (taken out of the ghcr images, no docker) ran on the dev box as real
+instances with `RATINGS_DISABLED=true`, on real TMDB data. Two smoke tests, reports in the dev box's
+`/home/dev/opdb-fork/reports/` (`smoke-rc3-api.md`, `smoke-rc3-ui.md`), not in this repo:
+
+- **API / server (rc.3): passed.** Louk's four URL patterns (posters, `imageSize=large` backdrops at
+  1920x1080, logos, episode stills), byte-identical repeat requests; strong `ETag` equal to the body hash,
+  `If-None-Match` answers `304` without a body, `LOUK_HTTP_ETAG=false` removes the header and the bodies stay
+  identical; the title index (search, filters, show detail with seasons, purge); per-title overrides on
+  The Man in the High Castle (logo set and cleared on the tmdb, imdb and tvdb routes, the automatic pick
+  marked correctly, uploads and all rejections, delayed re-purge after 60 s) and on a movie and an episode
+  still; the `?art=` previews of the three looks.
+- **Memory burst (rc.3, 490 requests at once, production settings): peak 705 MB** (VmHWM), idle 279 MB,
+  p95 12.6 s. P1.4 had measured 744 to 785 MB with the same three settings; upstream with none of them
+  peaked at about 2.4 GB. 8 of the 490 requests answer `500`: the known logos that cannot be decoded.
+- **Rollback check:** the upstream `v1.3.0` binary (also taken from its ghcr image) opened a copy of the
+  database the fork had migrated: login, keys, settings and the cache lists work, and an unknown badge look
+  (`s`, `m`, `a`) reads as the default. This proves going back to the upstream image needs no restore.
+- **Admin UI in a real headless browser (rc.3, then rc.4): the first run failed on UI details, the re-check
+  passed.** Found on rc.3 and fixed in rc.4: the picker was unusable at 412 px (buttons off-screen), no
+  lasting "override active" marker, an empty row after saving, no rating note in the purge dialog, a dark
+  checkerboard that hid black logos. rc.4 re-checked on desktop and phone width: picking, clearing and
+  uploading end to end, chips that survive a reload, merged alias tiles, keyboard use of the picker, no
+  console errors.
+
+**What was not tested:**
+
+- **Live rating APIs.** Every run used `RATINGS_DISABLED=true`, no MDBList, OMDb or Trakt key. Badges on
+  real ratings, the "no badges" override against real scores, the stale-while-revalidate background fetch
+  and the ETag image under real traffic ran only in unit tests and with sample scores.
+- **The docker image's entrypoint and healthcheck.** Only the binary was extracted and run; the image
+  itself never ran (no docker on the dev box). Whether the entrypoint's `su` passes the two `MALLOC_*`
+  variables to the process is checked by the deploy script, not before.
+- **Real devices.** No TV, phone or desktop app looked at a badge look or at a backdrop with a badge;
+  the badge gallery and the headless browser only simulate them.
+- The title dashboard and overrides on a copy of the production database (the rollback check used a
+  development database), and the upstream PR branch on a real instance.
 
 ## Not done / open items
 
@@ -529,8 +572,10 @@ True for the integrated branch `louk/next`. Nothing here is listed as "not start
 | **Backdrop cap range 1281 to 1919** | With `BACKDROP_MAX_WIDTH` in that range a `medium` backdrop would fetch TMDB's `original` instead of `w780`: more memory, the opposite of the aim. Caps up to 1280 fetch `w1280` instead of `w780`. Production uses 1920, where `small` and `medium` are not capped. | If another value is ever needed, never fetch a larger TMDB size than upstream does for that `imageSize` (one-line change in `reports/P1.2-review.md`, SHOULD-FIX 1). |
 | **Real-device checks** | Not done: TV overscan, trailers that replace the backdrop on TVs, the Android status bar over the phone banner, the desktop app's window controls; and how the badge looks read on a real TV and phone (the gallery only simulates the app's shades). | Louk looks at a key set to a look, on his devices. |
 | **Uploads are never cleaned up** | Files in `db/uploads/` stay after an override is changed or cleared. | Delete by hand, or build a sweep if it grows. |
-| **Never run against live rating APIs** | Every dev and test run used `RATINGS_DISABLED=true`. Badges on real ratings, the "no badges" override, the SWR background fetch and the ETag image under real traffic have run only in tests and with sample scores. The title dashboard and overrides were not run on a copy of the production database either (the rollback check is a test). | First production hours: watch `openposterdb-mdblist-watch` and the container memory. |
+| **Never run against live rating APIs** | Every dev and test run used `RATINGS_DISABLED=true`. Badges on real ratings, the "no badges" override, the SWR background fetch and the ETag image under real traffic have run only in tests and with sample scores. The title dashboard and overrides were not run on a copy of the production database either (the rollback check ran on a development database). | First production hours: watch `openposterdb-mdblist-watch` and the container memory. |
 | **Next memory lever** | Not built. If production still gets killed at 1536m after the three settings, bound how many requests hold a downloaded source while they wait for a render permit (about 2 x `RENDER_CONCURRENCY`). Measured at -80 to -140 MB (10 to 15%), but it touches the fetch path of the four image kinds in `generate.rs`. Details in [memory.md](memory.md). | Only if needed. |
+| **Small UI nice-to-haves** (left from the rc.4 re-check) | The "Override active" chip says only "TMDB": language, size and "no badges" would help (`web/src/louk/views/TitleView.vue`, `overrideLabel`). A section header counts Logos 2 while the merged alias tile shows one. The "Served now" caption is cut off on a phone (`OverridePicker.vue`, allow two lines). The look descriptions only appear after selecting one, not inside the dropdown (`RenderSettingsForm.vue`). None blocks use. | Fix together in one small change if any of them annoys. |
+| **Figures on a phone grid stay small** | In the gallery's 412 px phone grid the figures of `s` are about 6 to 7 px and of `a` about 6 px: a render cannot know the app's card size. Not fixable in the render; the advice is under "Phone-first keys" above. | For a key used mainly on phones: Badge background `a`, Badge size `xl`, Max ratings 1 or 2; keep the row looks (`s`) for the TV key. |
 | MDBList quota view | Not built. | Only if the MDBList client already reads usage headers. |
 | Badge looks in the free-key form | `web/src/components/FreeApiKeyCard.vue` does not list `s`/`m`/`a`; the server accepts them. Production runs `FREE_KEY_ENABLED=false`. | Add the same `v-for` as in `RenderSettingsForm.vue` if free keys are ever enabled. |
 
