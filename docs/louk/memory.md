@@ -9,8 +9,11 @@ Measured 2026-11-25 (P1.4) on the dev box against the released `v1.3.0-louk.1` b
   keeps about 2 GB after the burst: glibc never gives it back. Production kills the container at 1536 MiB,
   so one cold catalog burst is enough to kill it. One A run where the poster lookups still went to the
   TMDB API during the burst (so requests queued longer) peaked at 2988 MB.
-- **The memory is malloc heap**, not file mappings: anonymous memory is within 2–8% of VmHWM in every run,
-  and file-backed RSS is a constant 16 MB (the binary).
+- **The memory is malloc heap**, not file mappings: file-backed RSS is a constant 16–17 MB (the binary)
+  in every run, so everything else is anonymous memory. The 1 s side sampler's anonymous peak is 98–99%
+  of VmHWM with default glibc (A, C), but only 79–91% in the variants that free memory quickly (C2, C3,
+  A3, Cm). Under tuned glibc the peak is a short spike above a sustained level about 20% lower (C3:
+  sustained about 620 MB, VmHWM 744–785 MB). That matters for `mem_limit`: the kill happens on the spike.
 - **`BACKDROP_MAX_WIDTH=1920` alone is not enough:** 1617 MB (68% of A), still above 1536. It makes
   p95 latency 38% better (11.7 s vs 18.5–19.0 s).
 - **glibc tuning through the environment is the big lever.** With the cap, `MALLOC_ARENA_MAX=2` gives
