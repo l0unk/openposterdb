@@ -21,6 +21,7 @@ pub struct Config {
     pub external_cache_only: bool,
     pub free_key_enabled: Option<bool>,
     pub disable_public_pages: bool,
+    pub louk: crate::louk::config::LoukConfig, // louk-fork:
 }
 
 impl std::fmt::Debug for Config {
@@ -45,6 +46,7 @@ impl std::fmt::Debug for Config {
             .field("external_cache_only", &self.external_cache_only)
             .field("free_key_enabled", &self.free_key_enabled)
             .field("disable_public_pages", &self.disable_public_pages)
+            .field("louk", &self.louk) // louk-fork:
             .finish()
     }
 }
@@ -66,7 +68,7 @@ fn optional_secret(key: &str) -> Option<String> {
 
 impl Config {
     pub fn from_env() -> Self {
-        let config = Self {
+        let mut config = Self {
             tmdb_api_key: env::var("TMDB_API_KEY").expect("TMDB_API_KEY must be set"),
             omdb_api_key: optional_secret("OMDB_API_KEY"),
             cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".into()),
@@ -109,7 +111,15 @@ impl Config {
             disable_public_pages: env::var("DISABLE_PUBLIC_PAGES")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            louk: crate::louk::config::LoukConfig::from_env(), // louk-fork: RATINGS_DISABLED never builds the rationed clients and skips the provider check
         };
+        if config.louk.ratings_disabled {
+            config.omdb_api_key = None;
+            config.mdblist_api_key = None;
+            config.trakt_client_id = None;
+            tracing::warn!("RATINGS_DISABLED=true: no rating lookups; images render without badges");
+            return config;
+        }
 
         if config.omdb_api_key.is_none()
             && config.mdblist_api_key.is_none()
@@ -155,6 +165,7 @@ mod tests {
             "EXTERNAL_CACHE_ONLY",
             "FREE_KEY_ENABLED",
             "DISABLE_PUBLIC_PAGES",
+            "RATINGS_DISABLED", "BACKDROP_MAX_WIDTH", // louk-fork:
         ] {
             unsafe { env::remove_var(key) };
         }
@@ -317,5 +328,52 @@ mod tests {
 
         let cfg = Config::from_env();
         assert!(cfg.free_key_enabled.is_none());
+    }
+    // louk-fork: RATINGS_DISABLED tests
+    #[test]
+    #[serial]
+    fn ratings_disabled_allows_no_provider() {
+        unsafe { clear_config_env() };
+        unsafe { env::set_var("TMDB_API_KEY", "t") };
+        unsafe { env::set_var("RATINGS_DISABLED", "true") };
+        let cfg = Config::from_env(); // must not panic
+        assert!(cfg.louk.ratings_disabled);
+    }
+
+    #[test]
+    #[serial]
+    fn ratings_disabled_drops_rationed_clients() {
+        unsafe { clear_config_env() };
+        for (k, v) in [
+            ("TMDB_API_KEY", "t"),
+            ("OMDB_API_KEY", "o"),
+            ("MDBLIST_API_KEY", "m"),
+            ("TRAKT_CLIENT_ID", "k"),
+            ("RATINGS_DISABLED", "1"),
+        ] {
+            unsafe { env::set_var(k, v) };
+        }
+        let cfg = Config::from_env();
+        assert!(cfg.omdb_api_key.is_none() && cfg.mdblist_api_key.is_none() && cfg.trakt_client_id.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn ratings_disabled_false_keeps_upstream_panic() {
+        unsafe { clear_config_env() };
+        unsafe { env::set_var("TMDB_API_KEY", "t") };
+        unsafe { env::set_var("RATINGS_DISABLED", "false") };
+        assert!(std::panic::catch_unwind(Config::from_env).is_err());
+    }
+
+    #[test]
+    #[serial]
+    fn ratings_disabled_unset_keeps_upstream_clients() {
+        unsafe { clear_config_env() };
+        unsafe { env::set_var("TMDB_API_KEY", "t") };
+        unsafe { env::set_var("OMDB_API_KEY", "o") };
+        let cfg = Config::from_env();
+        assert_eq!(cfg.louk, crate::louk::config::LoukConfig::default());
+        assert_eq!(cfg.omdb_api_key.as_deref(), Some("o"));
     }
 }

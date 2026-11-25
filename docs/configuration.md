@@ -53,3 +53,11 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | Variable | Default | Description |
 |---|---|---|
 | `RUST_LOG` | `warn` | Log level filter — levels: `error`, `warn`, `info`, `debug`, `trace`. Supports comma-separated per-module overrides. Relevant modules: `openposterdb_api` (app), `tower_http` (HTTP tracing), `sea_orm` / `sqlx` (database), `reqwest` / `hyper` (HTTP client/server). Example: `warn,openposterdb_api=info,tower_http=debug` |
+
+## Fork-only (loukdekker.nl)
+
+These variables exist only in the loukdekker.nl fork (see [docs/louk/FORK.md](louk/FORK.md)). Unset, the server behaves exactly like upstream.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RATINGS_DISABLED` | `false` | **For dev and test instances only; never in production.** `true` or `1` ignores `OMDB_API_KEY`, `MDBLIST_API_KEY` and `TRAKT_CLIENT_ID` (those clients are never built, so no rating quota is spent), skips the "one ratings source" startup check, and skips every rating lookup including TMDB votes. Images render without badges, and the `available_ratings` index is not written |

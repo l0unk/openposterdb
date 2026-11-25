@@ -130,6 +130,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
             external_cache_only,
             free_key_enabled,
             disable_public_pages: false,
+            louk: Default::default(), // louk-fork:
         },
         tmdb: TmdbClient::new("test".into(), http.clone()),
         omdb: None,

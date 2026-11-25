@@ -416,6 +416,7 @@ async fn upsert_available_ratings_cached(
     sources: &str,
     release_date: Option<&str>,
 ) {
+    if state.config.louk.ratings_disabled { return; } // louk-fork: no real sources; don't erase the index with ""
     if let Err(e) = cache::upsert_available_ratings(&state.db, id_key, sources, release_date).await {
         tracing::warn!(error = %e, key = %id_key, "available_ratings upsert failed");
     }
@@ -444,6 +445,7 @@ async fn resolve_with_ratings(
     uplift_episodes: bool,
     skip_ratings: bool,
 ) -> Result<(id::ResolvedId, ratings::RatingsResult, CrossIdInfo), AppError> {
+    let skip_ratings = crate::louk::config::effective_skip_ratings(&state.config.louk, skip_ratings); // louk-fork:
     let id_resolve_start = Instant::now();
     let mut resolved = id::resolve(id_type, id_value, &state.tmdb, &state.id_cache).await?;
 
