@@ -227,7 +227,7 @@ Why it is safe:
 | **Memory measurements and allocator (P1.4 to P1.7)** | **No numbers exist.** The release build that was meant to measure them was interrupted on 2026-11-25 by a memory stall on the dev box (a cargo release build and a frontend build ran together under a small memory limit; the box thrashed for 5 hours). The load harness is ready in `scripts/louk/` (its self-test passes against a stub; it has never run against a real binary). The `BACKDROP_MAX_WIDTH` change is in, but its effect on peak memory is **not measured**. No allocator (mimalloc/jemalloc) is built in, `MALLOC_ARENA_MAX` is untested, and the in-flight render cache is not bounded. | One release build with `-j1`, then the runs A to D. Exact procedure in [memory.md](memory.md). A local branch `louk/p1-4` in the dev-box clone has the source at that point; it has the same content as `main`, so nothing is lost. |
 | **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`, CI green. The backend (title table, admin routes) is unfinished and uncommitted work in a local worktree (branch `louk/p2-1`); none of it is pushed. Not merged, not in any release. | Finish and commit the backend, then merge both, after a local smoke run against a real instance. Add the "upstream opens a fork-migrated database" test first. |
 | **Per-title overrides and uploads, and the upstream PR (P3)** | Not started. The design is written down (key = resolved title + image kind, value = TMDB path, Fanart image or upload; admin only). The wrong-logo case (The Man in the High Castle: three logos with 0 votes, upstream picks the last of equal ones) is not fixed. | Build after the dashboard, then prepare the branch `pr/per-title-overrides` from upstream `main` for Louk to open on GitHub. |
-| **New badge styles (P4)** | Three looks built (P4.1, branch `louk/p4-1`), default unchanged; see "Badge styles". Not yet seen on real art. | The gallery (P4.2) renders them on real titles at card, TV-row and phone-grid size; expect one tuning round. |
+| **New badge styles (P4)** | Three looks built (P4.1, branch `louk/p4-1`), default unchanged; see "Badge styles". Seen on real art in the [gallery](badges.html) (P4.2). | One tuning round from the gallery notes, then re-render the gallery. |
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |
 | **Safe-area preset in code (P5)** | **Documentation only, by decision.** The existing settings already express a safe area, so no preset and no crop overlay was built. | Louk sets one or two fields per key by hand (see "Backdrop safe areas"). |
 | MDBList quota view | Not built. | Only if the MDBList client already reads usage headers. |
@@ -301,8 +301,18 @@ distance; its colours were chosen to stay apart for colour-blind viewers, and th
 the same information. On backdrops the default is a column of five badges at the top right, whose bottom
 two sit in the Home banner's dark fade (see "Backdrop safe areas"); one disc in that corner stays in
 the clean area. In phone grids no row of small badges reads, so a phone-only key would use `a` on
-posters too. These are recommendations from the design and the measurements, not yet from the gallery
-(P4.2), which shows them on real titles.
+posters too. These are recommendations from the design and the measurements; the gallery
+(below) shows them on real titles and its first look did not contradict them (open tuning items are
+listed in the P4.2 report).
+
+**Gallery.** [badges.html](badges.html) shows every look (`d` for comparison, `s`, `m`, `a`) on six real
+titles chosen to stress them (very dark, very bright, busy, animated, white top-right on the backdrop):
+a TV row of 240 x 360 cards on a 1920 px layout, a 412 px phone grid, backdrops as a 1280 x 720 hero
+under the app's shades (default column and the horizontal top-right row), episode stills and logos.
+Open the file in a browser; the images are in `badges/`. Re-render with `scripts/louk/gallery.py`
+against a local instance (see the header of that script); `scripts/louk/gallery-shots.js` takes
+screenshots of the page. The previews use sample ratings, so the `d` row shows upstream's sample values
+(10.0 and so on) next to the spread samples of the fork looks.
 
 Hooks: see the badge-look rows in "Divergence points in upstream files". Rollback: upstream reads a
 stored `s`, `m` or `a` as its default (`d`) and logs a warning; images keyed `.bgs`/`.bgm`/`.bga` are
