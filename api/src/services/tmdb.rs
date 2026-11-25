@@ -122,7 +122,9 @@ impl TmdbClient {
         // `max_by` picks a standard-ratio image over any off-ratio one, and the
         // highest vote among equals. With `target_ratio = None` (logos,
         // backdrops) the ratio key is always false, so ranking is vote-only —
-        // identical to the previous behavior.
+        // identical to the previous behavior. `max_by` returns the LAST of
+        // equally ranked images, so it runs over the reversed list: ties go to
+        // the first one in TMDB's order (e.g. several 0-vote logos).
         let rank = |img: &TmdbImage| -> (bool, f64) {
             let standard = match target_ratio {
                 Some(r) => img.aspect_ratio > 0.0 && (img.aspect_ratio - r).abs() <= POSTER_RATIO_TOL,
@@ -137,6 +139,7 @@ impl TmdbClient {
             images
                 .iter()
                 .filter(|img| img.iso_639_1.as_deref() == target)
+                .rev()
                 .max_by(cmp)
         };
 
@@ -156,6 +159,7 @@ impl TmdbClient {
             let regional = images
                 .iter()
                 .filter(|img| img.iso_639_1.as_deref() == Some(base) && img.iso_3166_1.as_deref() == Some(region))
+                .rev()
                 .max_by(cmp);
             if let Some(img) = regional {
                 return Some(img);
@@ -300,6 +304,34 @@ mod tests {
             img("/en.jpg", Some("en"), 9.0),
         ];
         assert!(TmdbClient::select_image(&images, "en", true).is_none());
+    }
+
+    #[test]
+    fn select_image_ties_pick_the_first() {
+        // The Man in the High Castle (tv/62017): three English logos, all 0 votes.
+        let images = vec![
+            img("/first.png", Some("en"), 0.0),
+            img("/second.png", Some("en"), 0.0),
+            img("/third.png", Some("en"), 0.0),
+        ];
+        assert_eq!(TmdbClient::select_image(&images, "en", false).unwrap().file_path, "/first.png");
+        assert_eq!(TmdbClient::select_poster(&images, "en", false).unwrap().file_path, "/first.png");
+        // A higher vote still wins wherever it is.
+        let images = vec![
+            img("/a.png", Some("en"), 2.0),
+            img("/b.png", Some("en"), 5.0),
+            img("/c.png", Some("en"), 5.0),
+        ];
+        assert_eq!(TmdbClient::select_image(&images, "en", false).unwrap().file_path, "/b.png");
+        // Same for regional and language-less tiers.
+        let images = vec![
+            img_regional("/br1.jpg", "pt", "BR", 1.0),
+            img_regional("/br2.jpg", "pt", "BR", 1.0),
+            img("/none1.jpg", None, 0.0),
+            img("/none2.jpg", None, 0.0),
+        ];
+        assert_eq!(TmdbClient::select_image(&images, "pt-BR", false).unwrap().file_path, "/br1.jpg");
+        assert_eq!(TmdbClient::select_image(&images, "", false).unwrap().file_path, "/none1.jpg");
     }
 
     #[test]

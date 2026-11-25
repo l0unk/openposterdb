@@ -2,9 +2,10 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { Eye, Loader2, Download, Trash2 } from 'lucide-vue-next'
+import { Eye, Loader2, Download, Trash2, ImageUp } from 'lucide-vue-next'
 import { titleIdFromCacheValue } from '@/lib/utils'
 import RefreshButton from '@/components/RefreshButton.vue'
+import OverridePicker from '@/components/OverridePicker.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -228,6 +229,23 @@ async function confirmClearAll() {
   }
 }
 
+// --- Per-title art override for the row's title ---
+const overrideOpen = ref(false)
+const overrideTarget = ref<{ idType: string; idValue: string }>({ idType: '', idValue: '' })
+const overrideMessage = ref('')
+
+function openOverride(cacheKey: string) {
+  const { idType, idValue } = parseKey(cacheKey)
+  overrideTarget.value = { idType, idValue: titleIdFromCacheValue(idValue) }
+  overrideMessage.value = ''
+  overrideOpen.value = true
+}
+
+function onOverrideChanged(message: string) {
+  overrideMessage.value = message
+  refetch()
+}
+
 function parseKey(cacheKey: string) {
   const idx = cacheKey.indexOf('/')
   if (idx === -1) return { idType: cacheKey, idValue: '' }
@@ -286,6 +304,7 @@ const skeletonClass = computed(() => {
       <RefreshButton :fetching="isFetching" @refresh="refetch()" />
     </div>
     <p v-if="clearAllMessage" class="text-sm text-muted-foreground text-right">{{ clearAllMessage }}</p>
+    <p v-if="overrideMessage" class="text-sm text-muted-foreground text-right" data-testid="override-message">{{ overrideMessage }}</p>
     <div v-if="isPending" class="space-y-3">
       <Skeleton v-for="i in 5" :key="i" class="h-10 w-full" />
     </div>
@@ -299,7 +318,7 @@ const skeletonClass = computed(() => {
             <TableHead>Release Date</TableHead>
             <TableHead>Last Updated</TableHead>
             <TableHead>Created</TableHead>
-            <TableHead class="w-10 text-right"><span class="sr-only">Actions</span></TableHead>
+            <TableHead class="w-20 text-right"><span class="sr-only">Actions</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -315,7 +334,17 @@ const skeletonClass = computed(() => {
             <TableCell>{{ item.release_date || '—' }}</TableCell>
             <TableCell>{{ relativeTime(item.updated_at) }}</TableCell>
             <TableCell>{{ formatDate(item.created_at) }}</TableCell>
-            <TableCell class="text-right">
+            <TableCell class="whitespace-nowrap text-right">
+              <Button
+                variant="ghost"
+                size="icon"
+                class="size-8 text-muted-foreground hover:text-foreground"
+                :aria-label="`Override ${kindLabel}`"
+                :title="`Choose or upload the ${kindLabel} art for this title`"
+                @click.stop="openOverride(item.cache_key)"
+              >
+                <ImageUp class="size-4" />
+              </Button>
               <Button
                 variant="ghost"
                 size="icon"
@@ -427,6 +456,14 @@ const skeletonClass = computed(() => {
         </div>
       </DialogContent>
     </Dialog>
+
+    <OverridePicker
+      v-model:open="overrideOpen"
+      :kind="kind"
+      :id-type="overrideTarget.idType"
+      :id-value="overrideTarget.idValue"
+      @changed="onOverrideChanged"
+    />
 
     <Dialog :open="previewOpen" @update:open="(v: boolean) => { if (!v) closePreview() }">
       <DialogContent :class="previewSizeClass">
