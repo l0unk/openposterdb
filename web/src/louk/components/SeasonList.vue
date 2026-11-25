@@ -8,7 +8,11 @@ import type { EpisodeEntry, SeasonEntry, TitleImage } from '@/louk/api'
 import { relativeTime } from '@/louk/format'
 
 const props = defineProps<{ seasons: SeasonEntry[] }>()
-const emit = defineEmits<{ view: [image: TitleImage]; purge: [image: TitleImage] }>()
+const emit = defineEmits<{
+  view: [image: TitleImage]
+  purge: [image: TitleImage]
+  override: [episode: { season: number; episode: number; name: string; rendered: TitleImage | null }]
+}>()
 
 function cachedCount(s: SeasonEntry): number {
   return s.episodes.filter((e) => e.cached.length > 0).length
@@ -103,8 +107,14 @@ function episodeName(e: EpisodeEntry): string {
                 </Button>
               </li>
             </ul>
-            <Button v-if="e.cached.length" variant="outline" size="sm" disabled title="Per-episode overrides arrive with art overrides">
-              Override (coming)
+            <Button
+              variant="outline"
+              size="sm"
+              :aria-label="`Override the still of ${seasonLabel(s)} ${episodeName(e)}`"
+              data-testid="override-episode"
+              @click="emit('override', { season: s.season, episode: e.episode, name: episodeName(e), rendered: e.cached[0] ?? null })"
+            >
+              Override
             </Button>
           </li>
         </ul>

@@ -5,9 +5,11 @@ import { Eye, ImageOff, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { fetchImageBlob, type TitleImage } from '@/louk/api'
+import { withBust } from '@/louk/overrides'
 import { relativeTime } from '@/louk/format'
 
-const props = defineProps<{ image: TitleImage }>()
+// `bust`: bumped after an override change so the tile asks the server again instead of reusing the browser's copy.
+const props = defineProps<{ image: TitleImage; bust?: number }>()
 const emit = defineEmits<{ view: [image: TitleImage]; purge: [image: TitleImage] }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -27,7 +29,7 @@ async function load() {
   if (state.value !== 'idle') return
   state.value = 'loading'
   try {
-    const blob = await fetchImageBlob(props.image.admin_image_url)
+    const blob = await fetchImageBlob(withBust(props.image.admin_image_url, props.bust))
     if (gone) return
     src.value = URL.createObjectURL(blob)
     state.value = 'ready'
