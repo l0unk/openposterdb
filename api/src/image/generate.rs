@@ -356,6 +356,7 @@ pub fn render_poster_sync(
     // A pill is a horizontal lozenge (icon/label left, value right) — never a
     // vertical stacked badge, even when the configured style is vertical.
     let badge_style = badge_style.for_shape(badge_appearance.shape);
+    let louk_badges = crate::louk::badge_looks::collapse(badges, badge_appearance); let badges: &[RatingBadge] = &louk_badges; // louk-fork: one aggregate badge for the Average look
     let base = load_image_with_limits(poster_bytes)?;
 
     // Normalize to the output frame (2:3 for every mode except Native) before
@@ -439,6 +440,7 @@ pub fn render_logo_sync(
     // A pill is a horizontal lozenge (icon/label left, value right) — never a
     // vertical stacked badge, even when the configured style is vertical.
     let badge_style = badge_style.for_shape(badge_appearance.shape);
+    let louk_badges = crate::louk::badge_looks::collapse(badges, badge_appearance); let badges: &[RatingBadge] = &louk_badges; // louk-fork: one aggregate badge for the Average look
     let base = load_image_with_limits(logo_bytes)?;
 
     let base = if base.width() != target_width {
@@ -627,6 +629,7 @@ pub fn render_backdrop_sync(
     // A pill is a horizontal lozenge (icon/label left, value right) — never a
     // vertical stacked badge, even when the configured style is vertical.
     let badge_style = badge_style.for_shape(badge_appearance.shape);
+    let louk_badges = crate::louk::badge_looks::collapse(badges, badge_appearance); let badges: &[RatingBadge] = &louk_badges; // louk-fork: one aggregate badge for the Average look
     let base = load_image_with_limits(backdrop_bytes)?;
 
     let base = if base.width() != target_width {
@@ -726,6 +729,7 @@ pub fn render_episode_sync(
     // A pill is a horizontal lozenge (icon/label left, value right) — never a
     // vertical stacked badge, even when the configured style is vertical.
     let badge_style = badge_style.for_shape(badge_appearance.shape);
+    let louk_badges = crate::louk::badge_looks::collapse(badges, badge_appearance); let badges: &[RatingBadge] = &louk_badges; // louk-fork: one aggregate badge for the Average look
     let base = image::load_from_memory(image_bytes)
         .map_err(AppError::Image)?;
 

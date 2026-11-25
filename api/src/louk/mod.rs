@@ -2,4 +2,5 @@
 //! small hooks tagged with a `louk-fork` comment (see docs/louk/FORK.md).
 
 pub mod backdrop_cap;
+pub mod badge_looks;
 pub mod config;

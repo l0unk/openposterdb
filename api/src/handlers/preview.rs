@@ -222,7 +222,7 @@ pub async fn preview_poster(
     }
 
     // 3. Render and cache to both layers
-    let badges = sample_badges();
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let poster_png: &'static Vec<u8> = &SAMPLE_POSTER_PNG;
@@ -277,7 +277,7 @@ pub async fn preview_logo(
         return Ok(preview_png_response(bytes));
     }
 
-    let badges = sample_badges();
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let logo_png: &'static Vec<u8> = &SAMPLE_LOGO_PNG;
@@ -338,7 +338,7 @@ pub async fn preview_backdrop(
         return Ok(preview_response(bytes));
     }
 
-    let badges = sample_badges();
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let backdrop_png: &'static Vec<u8> = &SAMPLE_BACKDROP_PNG;
@@ -419,7 +419,7 @@ pub async fn preview_episode(
         return Ok(preview_response(bytes));
     }
 
-    let badges = sample_badges();
+    let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
     let episode_png: &'static Vec<u8> = &SAMPLE_EPISODE_PNG;
