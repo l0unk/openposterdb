@@ -141,6 +141,22 @@ async function ok(res: Response): Promise<Response> {
   return res
 }
 
+/** Every override row of a title (poster, logo, backdrop, stills; all language rows). */
+export async function getOverrides(mediaType: MediaType, tmdbId: number | string): Promise<Override[]> {
+  const res = await ok(await get(`${BASE}/overrides/${seg(mediaType)}/${seg(tmdbId)}`))
+  const body = await res.json()
+  return Array.isArray(body?.overrides) ? body.overrides : []
+}
+
+/** Short words for the "override active" chip: "TMDB English", "Upload", "Badges off", "Fanart, badges off". */
+export function overrideLabel(o: Pick<Override, 'source' | 'lang' | 'no_badges'>): string {
+  if (o.source === 'auto') return 'Badges off'
+  const parts = [sourceLabel(o.source)]
+  if (o.lang) parts.push(languageLabel(o.lang))
+  const base = parts.join(' ')
+  return o.no_badges ? `${base}, badges off` : base
+}
+
 export async function getCandidates(t: OverrideTarget, lang?: string | null): Promise<Candidates> {
   const res = await ok(await get(`${BASE}/candidates/${route(t)}${targetQuery(t, kindHasLanguage(t.kind) ? lang : null)}`))
   return res.json()
@@ -249,6 +265,8 @@ export function scoreLabel(c: Pick<Candidate, 'votes' | 'vote_count' | 'likes'> 
   }
   if (c.votes == null) return null
   const n = c.vote_count
+  // TMDB reports 0.0 from 0 votes for most logos and stills: say "no votes" instead.
+  if (c.votes === 0 || n === 0) return 'no votes'
   return n == null ? `${c.votes.toFixed(1)} votes` : `${c.votes.toFixed(1)} from ${n} ${n === 1 ? 'vote' : 'votes'}`
 }
 

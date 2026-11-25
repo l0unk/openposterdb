@@ -43,7 +43,7 @@ import {
   type TitleImage,
 } from '@/louk/api'
 import { relativeTime } from '@/louk/format'
-import type { OverrideTarget } from '@/louk/overrides'
+import { getOverrides, overrideLabel, type Override, type OverrideTarget } from '@/louk/overrides'
 
 const route = useRoute()
 const router = useRouter()
@@ -61,6 +61,31 @@ const { data, isPending, isFetching, isError, error, refetch } = useQuery({
   enabled: computed(() => mediaType.value !== null),
   retry: false,
 })
+
+// Override rows of the title (louk-fork: P3.3): drive the "Override active" chips.
+const { data: overrideRows } = useQuery({
+  queryKey: computed(() => ['louk', 'overrides', mediaType.value, tmdbId.value]),
+  queryFn: () => getOverrides(mediaType.value!, tmdbId.value),
+  enabled: computed(() => mediaType.value !== null),
+  retry: false,
+})
+
+function overridesOf(kind: ImageKind): Override[] {
+  return (overrideRows.value ?? []).filter((o) => o.kind === kind)
+}
+
+// Renders with the same settings under other ids (imdb/tmdb/tvdb of one title) are the same picture: one tile.
+function groupsOf(kind: ImageKind): { image: TitleImage; also: TitleImage[] }[] {
+  const groups = new Map<string, { image: TitleImage; also: TitleImage[] }>()
+  for (const img of imagesOf(kind)) {
+    const at = img.cache_value.indexOf('@')
+    const key = at < 0 ? `${img.id_type}/${img.cache_value}` : img.cache_value.slice(at)
+    const g = groups.get(key)
+    if (g) g.also.push(img)
+    else groups.set(key, { image: img, also: [] })
+  }
+  return [...groups.values()]
+}
 
 // Also while "Try again" is running, so the page never looks frozen on a slow first open of a show.
 const loading = computed(() => isPending.value || (isError.value && isFetching.value && !data.value))
@@ -97,12 +122,12 @@ function goBack() {
 }
 
 // --- status banner (success or failure of the last action) ---
-const banner = ref<{ ok: boolean; text: string; action?: { label: string; run: () => Promise<void> } } | null>(null)
+const banner = ref<{ ok: boolean; text: string; busy?: boolean } | null>(null)
 let bannerTimer: ReturnType<typeof setTimeout> | undefined
-function say(ok: boolean, text: string, action?: { label: string; run: () => Promise<void> }) {
-  banner.value = { ok, text, action }
+function say(ok: boolean, text: string, busy = false) {
+  banner.value = { ok, text, busy }
   clearTimeout(bannerTimer)
-  if (ok) bannerTimer = setTimeout(() => (banner.value = null), action ? 30000 : 8000)
+  if (ok && !busy) bannerTimer = setTimeout(() => (banner.value = null), 12000)
 }
 onBeforeUnmount(() => clearTimeout(bannerTimer))
 
@@ -110,6 +135,7 @@ async function reload() {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ['louk', 'title', mediaType.value, tmdbId.value] }),
     queryClient.invalidateQueries({ queryKey: ['louk', 'titles'] }),
+    queryClient.invalidateQueries({ queryKey: ['louk', 'overrides', mediaType.value, tmdbId.value] }),
   ])
 }
 
@@ -152,13 +178,16 @@ async function runConfirm() {
   }
 }
 
-function askPurgeImage(img: TitleImage) {
+function askPurgeImage(img: TitleImage, also: TitleImage[] = []) {
+  const n = also.length + 1
   ask({
     title: `Purge ${img.kind}`,
-    body: 'Removes this cached render. It is generated again the next time something requests it.',
+    body: `Removes this cached render${n > 1 ? ` under all ${n} ids it is cached as` : ''}. It is generated again the next time something requests it. ${RATINGS_NOTE}`,
     label: 'Purge',
     destructive: true,
-    run: () => purgeImageVariant(img),
+    run: async () => {
+      for (const i of [img, ...also]) await purgeImageVariant(i)
+    },
     done: `Purged ${img.kind} ${img.cache_value}.`,
   })
 }
@@ -226,40 +255,29 @@ function openEpisodePicker(ep: { season: number; episode: number; name: string; 
   pickerOpen.value = true
 }
 
+// After a change the backend has purged the cached renders. Draw the new one right away (poster, backdrop, logo),
+// reload the list, and only then bump the cache-busting value so no tile asks for a file that is gone.
+// Episode stills cannot be drawn ahead of time by the backend: say so.
 async function onOverrideChanged(change: { kind: ImageKind; message: string; redrawable: boolean }) {
-  bust.value = Date.now()
-  const text = `${change.message} The cached ${change.kind === 'episode' ? 'still' : change.kind} was removed and is drawn again on the next request. ${APPS_NOTE}`
+  const t = data.value
   const kind = change.kind
-  say(
-    true,
-    text,
-    change.redrawable && kind !== 'episode'
-      ? {
-          label: 'Draw it now',
-          run: async () => {
-            const t = data.value
-            if (t) await refetchTitle(t.media_type, t.tmdb_id, kind)
-          },
-        }
-      : undefined,
-  )
+  let failure = ''
+  if (t && change.redrawable && kind !== 'episode') {
+    say(true, `${change.message} Drawing the new ${kind}...`, true)
+    try {
+      await refetchTitle(t.media_type, t.tmdb_id, kind)
+    } catch (e) {
+      failure = e instanceof Error ? e.message : 'the request failed'
+    }
+  }
   await reload()
-}
-
-const bannerBusy = ref(false)
-async function runBannerAction() {
-  const a = banner.value?.action
-  if (!a || bannerBusy.value) return
-  bannerBusy.value = true
-  try {
-    await a.run()
-    bust.value = Date.now()
-    say(true, `Drew the image again. ${APPS_NOTE}`)
-  } catch (e) {
-    say(false, `Drawing the image failed: ${e instanceof Error ? e.message : 'the request failed'}`)
-  } finally {
-    bannerBusy.value = false
-    await reload()
+  bust.value = Date.now()
+  if (failure) {
+    say(false, `${change.message} The ${kind} could not be drawn again right away (${failure}); it is drawn on the next request. ${APPS_NOTE}`)
+  } else if (kind === 'episode') {
+    say(true, `${change.message} The cached still was removed; it is drawn on the next request (the dashboard cannot draw single stills ahead of time). ${APPS_NOTE}`)
+  } else {
+    say(true, `${change.message} The ${kind} was drawn again. ${APPS_NOTE}`)
   }
 }
 
@@ -421,28 +439,18 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
         </div>
       </header>
 
-      <div
-        v-if="banner"
-        :role="banner.ok ? 'status' : 'alert'"
-        class="flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
-        :class="banner.ok ? 'bg-muted/40' : 'border-destructive/40 bg-destructive/5'"
-        data-testid="banner"
-      >
-        <Check v-if="banner.ok" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <TriangleAlert v-else class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-        <span class="min-w-0 flex-1 break-words">{{ banner.text }}</span>
-        <Button
-          v-if="banner.action"
-          variant="outline"
-          size="sm"
-          class="-my-1 shrink-0"
-          :disabled="bannerBusy"
-          data-testid="banner-action"
-          @click="runBannerAction"
+      <div v-if="banner" class="sticky top-2 z-20 rounded-md bg-background shadow-md">
+        <div
+          :role="banner.ok ? 'status' : 'alert'"
+          class="flex items-start gap-2 rounded-md border px-3 py-2 text-sm"
+          :class="banner.ok ? 'bg-muted/60' : 'border-destructive/40 bg-destructive/10'"
+          data-testid="banner"
         >
-          <Loader2 v-if="bannerBusy" class="animate-spin" />
-          {{ banner.action.label }}
-        </Button>
+          <Loader2 v-if="banner.busy" class="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" />
+          <Check v-else-if="banner.ok" class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <TriangleAlert v-else class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
+          <span class="min-w-0 flex-1 break-words">{{ banner.text }}</span>
+        </div>
       </div>
 
       <Collapsible v-if="data.aliases.length" class="rounded-lg border">
@@ -469,6 +477,10 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
           <component :is="s.icon" class="size-4 text-muted-foreground" aria-hidden="true" />
           <h2 :id="`sec-${s.kind}`" class="font-medium">{{ s.title }}</h2>
           <span class="text-sm text-muted-foreground tabular-nums">{{ imagesOf(s.kind).length }}</span>
+          <Badge v-for="o in overridesOf(s.kind)" :key="`${o.lang ?? ''}`" variant="secondary" data-testid="override-chip">
+            <Pencil aria-hidden="true" />
+            Override active: {{ overrideLabel(o) }}
+          </Badge>
           <div class="ml-auto flex gap-2">
             <Button variant="outline" size="sm" @click="askRefetch(s.kind)">
               <RotateCw />
@@ -481,8 +493,8 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
           </div>
         </div>
         <ul v-if="imagesOf(s.kind).length" class="grid gap-4" :class="s.grid">
-          <li v-for="img in imagesOf(s.kind)" :key="`${img.cache_value}:${bust}`" class="min-w-0">
-            <ImageTile :image="img" :bust="bust" @view="openView" @purge="askPurgeImage" />
+          <li v-for="g in groupsOf(s.kind)" :key="`${g.image.cache_value}:${bust}`" class="min-w-0">
+            <ImageTile :image="g.image" :also="g.also" :bust="bust" @view="openView" @purge="askPurgeImage(g.image, g.also)" />
           </li>
         </ul>
         <p v-else class="py-2 text-sm text-muted-foreground">
@@ -500,6 +512,7 @@ const viewSize = computed(() => (viewing.value?.kind === 'poster' ? 'max-w-md' :
           v-if="data.seasons && data.seasons.length"
           :key="seasonKey"
           :seasons="data.seasons"
+          :overrides="overrideRows ?? []"
           @view="openView"
           @purge="askPurgeImage"
           @override="openEpisodePicker"

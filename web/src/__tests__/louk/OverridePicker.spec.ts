@@ -161,6 +161,27 @@ describe('OverridePicker', () => {
     expect(t[3]!.text()).toContain('German (de)')
   })
 
+  it('keeps the actions in a footer outside the scrolling body, and the grid is one tab stop', async () => {
+    const w = await mountPicker()
+    const footer = w.find('[data-testid="footer"]')
+    expect(footer.find('[data-testid="save"]').exists()).toBe(true)
+    expect(footer.find('[data-testid="no-badges"]').exists()).toBe(true)
+    expect(w.find('[data-testid="body"]').find('[data-testid="footer"]').exists()).toBe(false)
+    const t = tiles(w)
+    expect(t.filter((b) => b.attributes('tabindex') === '0')).toHaveLength(1)
+    expect(t[0]!.attributes('tabindex')).toBe('0')
+    await t[2]!.trigger('focus')
+    expect(tiles(w)[2]!.attributes('tabindex')).toBe('0')
+    expect(tiles(w)[0]!.attributes('tabindex')).toBe('-1')
+  })
+
+  it('hides "0.0 from 0 votes"', async () => {
+    vi.mocked(getCandidates).mockResolvedValue(highCastle({ candidates: [cand({ votes: 0, vote_count: 0 })] }))
+    const w = await mountPicker()
+    expect(tiles(w)[0]!.text()).toContain('no votes')
+    expect(tiles(w)[0]!.text()).not.toContain('0.0')
+  })
+
   it('filters by language and by source', async () => {
     const w = await mountPicker()
     const select = w.find('select')

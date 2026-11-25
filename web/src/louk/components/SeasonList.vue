@@ -4,10 +4,12 @@ import { reactive } from 'vue'
 import { ChevronRight, Eye, Trash2 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
+import { Badge } from '@/components/ui/badge'
 import type { EpisodeEntry, SeasonEntry, TitleImage } from '@/louk/api'
+import { overrideLabel, type Override } from '@/louk/overrides'
 import { relativeTime } from '@/louk/format'
 
-const props = defineProps<{ seasons: SeasonEntry[] }>()
+const props = defineProps<{ seasons: SeasonEntry[]; overrides?: Override[] }>()
 const emit = defineEmits<{
   view: [image: TitleImage]
   purge: [image: TitleImage]
@@ -24,6 +26,10 @@ const anyCached = props.seasons.some((s) => cachedCount(s) > 0)
 props.seasons.forEach((s, i) => {
   open[s.season] = anyCached ? cachedCount(s) > 0 : i === 0
 })
+
+function episodeOverrides(season: number, episode: number): Override[] {
+  return (props.overrides ?? []).filter((o) => o.kind === 'episode' && o.season === season && o.episode === episode)
+}
 
 function seasonLabel(s: SeasonEntry): string {
   return s.season === 0 ? 'Specials' : `Season ${s.season}`
@@ -78,6 +84,15 @@ function episodeName(e: EpisodeEntry): string {
                 <span class="mr-1.5 font-mono text-xs text-muted-foreground">E{{ e.episode }}</span>{{ episodeName(e) }}
               </p>
               <p v-if="!e.cached.length" class="text-xs text-muted-foreground">Not cached</p>
+              <Badge
+                v-for="o in episodeOverrides(s.season, e.episode)"
+                :key="`${o.season}-${o.episode}-${o.lang ?? ''}`"
+                variant="secondary"
+                class="mt-0.5"
+                data-testid="override-chip"
+              >
+                Override active: {{ overrideLabel(o) }}
+              </Badge>
             </div>
             <ul v-if="e.cached.length" class="flex flex-wrap items-center gap-1.5">
               <li

@@ -3,7 +3,7 @@
 // candidates from TMDB and fanart.tv, an upload, a "no badges" switch, and a before/after comparison.
 // All requests go through '@/louk/overrides'; the title page owns refreshing after a change.
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
-import { ArrowDown, ArrowRight, Check, ImageOff, Loader2, Sparkles, TriangleAlert, Upload } from 'lucide-vue-next'
+import { ArrowRight, Check, ImageOff, Loader2, Sparkles, TriangleAlert, Upload } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -491,22 +491,47 @@ function onOpenChange(v: boolean) {
   emit('update:open', v)
 }
 
+// Mid-grey checks: black and white logos both stay visible (dark and light backings are one click away).
 const CHECKS = {
-  backgroundColor: '#26262b',
+  backgroundColor: '#8b8b93',
   backgroundImage:
-    'linear-gradient(45deg,#3a3a41 25%,transparent 25%,transparent 75%,#3a3a41 75%),linear-gradient(45deg,#3a3a41 25%,transparent 25%,transparent 75%,#3a3a41 75%)',
+    'linear-gradient(45deg,#b5b5bd 25%,transparent 25%,transparent 75%,#b5b5bd 75%),linear-gradient(45deg,#b5b5bd 25%,transparent 25%,transparent 75%,#b5b5bd 75%)',
   backgroundSize: '16px 16px',
   backgroundPosition: '0 0, 8px 8px',
 }
 const backingClass = computed(() => (backing.value === 'light' ? 'bg-neutral-100' : backing.value === 'dark' ? 'bg-neutral-950' : ''))
 const backingStyle = computed(() => (backing.value === 'checks' ? CHECKS : undefined))
 
+// Roving tabindex: the grid is one Tab stop; arrow keys, Home and End move between tiles.
+const grid = ref<HTMLElement | null>(null)
+const focusKey = ref<string | null>(null)
+const tabKey = computed(() => {
+  const keys = shown.value.map((t) => t.key)
+  if (focusKey.value && keys.includes(focusKey.value)) return focusKey.value
+  if (selectedKey.value && keys.includes(selectedKey.value)) return selectedKey.value
+  return keys[0] ?? null
+})
+
+function onGridKey(e: KeyboardEvent) {
+  const buttons = Array.from(grid.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+  if (!buttons.length) return
+  const at = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  let to = at
+  if (e.key === 'ArrowRight' || e.key === 'ArrowDown') to = Math.min(buttons.length - 1, at + 1)
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') to = Math.max(0, at - 1)
+  else if (e.key === 'Home') to = 0
+  else if (e.key === 'End') to = buttons.length - 1
+  else return
+  e.preventDefault()
+  buttons[to]?.focus()
+}
+
 const failedThumbs = reactive<Record<string, boolean>>({})
 const tileAspect = computed(() => (kind.value === 'poster' ? 'aspect-[2/3]' : 'aspect-video'))
 const gridClass = computed(() =>
   kind.value === 'poster'
-    ? 'grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]'
-    : 'grid-cols-[repeat(auto-fill,minmax(13rem,1fr))]',
+    ? 'grid-cols-[repeat(auto-fill,minmax(min(8rem,100%),1fr))]'
+    : 'grid-cols-[repeat(auto-fill,minmax(min(13rem,100%),1fr))]',
 )
 const fitClass = computed(() => (kind.value === 'logo' ? 'object-contain p-3' : 'object-contain'))
 const emptyAfterList = computed(() => !loading.value && !loadError.value && tiles.value.length === 0)
@@ -515,13 +540,15 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
 <template>
   <Dialog :open="open" @update:open="onOpenChange">
     <DialogContent
-      class="flex max-h-[92vh] flex-col gap-4 sm:max-w-5xl"
+      class="flex max-h-[100dvh] flex-col gap-0 overflow-hidden p-0 sm:max-h-[92vh] sm:max-w-5xl"
       data-testid="override-picker"
       @dragover.prevent="dragging = true"
       @dragleave.self="dragging = false"
       @drop.prevent="onDrop"
     >
-      <DialogHeader>
+      <!-- Everything but the footer scrolls; the footer (actions) is always reachable, also on a phone. -->
+      <div class="min-h-0 min-w-0 flex-1 space-y-3 overflow-x-hidden overflow-y-auto p-4 sm:space-y-4 sm:p-6" data-testid="body">
+      <DialogHeader class="pr-6">
         <DialogTitle>Override the {{ kindWord[kind] }}</DialogTitle>
         <DialogDescription>
           {{ heading }}. Pick another image, upload your own, or switch the rating badges off.
@@ -529,16 +556,19 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
       </DialogHeader>
 
       <!-- before / after -->
-      <div class="grid items-stretch gap-3 sm:grid-cols-[1fr_auto_1fr]" data-testid="compare">
+      <div
+        class="sticky top-0 z-10 -mx-4 grid grid-cols-2 items-stretch gap-2 border-b bg-background px-4 pb-2 sm:-mx-6 sm:grid-cols-[1fr_auto_1fr] sm:gap-3 sm:px-6"
+        data-testid="compare"
+      >
         <figure
           v-for="(side, i) in [before, after]"
           :key="i"
-          class="min-w-0 space-y-1.5 sm:row-start-1"
-          :class="i === 1 ? 'order-3 sm:col-start-3' : 'order-1 sm:col-start-1'"
+          class="min-w-0 space-y-1 sm:row-start-1"
+          :class="i === 1 ? 'sm:col-start-3' : 'sm:col-start-1'"
           :data-testid="i === 0 ? 'before' : 'after'"
         >
           <div
-            class="relative flex h-40 items-center justify-center overflow-hidden rounded-md border sm:h-52"
+            class="relative flex h-24 items-center justify-center overflow-hidden rounded-md border sm:h-40"
             :class="backingClass"
             :style="backingStyle"
           >
@@ -549,20 +579,17 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
               :alt="`${side.title}: ${side.detail}`"
               class="max-h-full max-w-full object-contain"
             />
-            <p v-else class="px-4 text-center text-sm" :class="backing === 'light' ? 'text-neutral-600' : 'text-neutral-400'">
+            <p v-else class="px-2 text-center text-xs sm:px-4 sm:text-sm" :class="backing === 'dark' ? 'text-neutral-400' : 'text-neutral-800'">
               {{ side.detail }}
             </p>
           </div>
-          <figcaption class="text-sm">
+          <figcaption class="line-clamp-2 text-xs sm:text-sm">
             <span class="font-medium">{{ side.title }}</span>
             <span v-if="side.src || side.loading" class="text-muted-foreground"> · {{ side.detail }}</span>
           </figcaption>
         </figure>
-        <div class="order-2 hidden items-center text-muted-foreground sm:col-start-2 sm:row-start-1 sm:flex" aria-hidden="true">
+        <div class="hidden items-center text-muted-foreground sm:col-start-2 sm:row-start-1 sm:flex" aria-hidden="true">
           <ArrowRight class="size-5" />
-        </div>
-        <div class="order-2 flex justify-center text-muted-foreground sm:hidden" aria-hidden="true">
-          <ArrowDown class="size-5" />
         </div>
       </div>
 
@@ -623,7 +650,7 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
 
       <!-- candidates -->
       <div
-        class="relative min-h-40 min-w-0 flex-1 overflow-y-auto rounded-md border p-3"
+        class="relative min-h-32 min-w-0 rounded-md border p-2 sm:p-3"
         :class="dragging ? 'border-primary border-dashed bg-primary/5' : ''"
         :aria-busy="loading"
       >
@@ -670,7 +697,15 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
             TMDB and fanart.tv have no {{ kindWord[kind] }} for this. Upload your own with the button above, or drop a file here.
           </p>
 
-          <ul v-else class="grid gap-3" :class="gridClass" data-testid="candidates" aria-label="Candidates">
+          <ul
+            v-else
+            ref="grid"
+            class="grid gap-3"
+            :class="gridClass"
+            data-testid="candidates"
+            aria-label="Candidates"
+            @keydown="onGridKey"
+          >
             <li v-for="t in shown" :key="t.key" class="min-w-0">
               <button
                 type="button"
@@ -678,6 +713,8 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
                 :class="t.key === selectedKey ? 'bg-accent ring-2 ring-primary' : t.current ? 'ring-1 ring-primary/60' : 'hover:bg-accent/50'"
                 :aria-pressed="t.key === selectedKey"
                 :aria-label="tileAria(t)"
+                :tabindex="t.key === tabKey ? 0 : -1"
+                @focus="focusKey = t.key"
                 data-testid="candidate"
                 @click="choose(t)"
               >
@@ -696,7 +733,7 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
                     :class="fitClass"
                     @error="failedThumbs[t.key] = true"
                   />
-                  <span v-else class="flex flex-col items-center gap-1 text-xs text-neutral-400">
+                  <span v-else class="flex flex-col items-center gap-1 text-xs" :class="backing === 'dark' ? 'text-neutral-400' : 'text-neutral-800'">
                     <ImageOff class="size-5" aria-hidden="true" />
                     No preview
                   </span>
@@ -737,66 +774,70 @@ const emptyAfterList = computed(() => !loading.value && !loadError.value && tile
         </template>
       </div>
 
-      <!-- footer -->
-      <p v-if="actionError" role="alert" class="flex items-start gap-2 text-sm text-destructive" data-testid="action-error">
-        <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        {{ actionError }}
-      </p>
-      <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
-        <button
-          type="button"
-          role="switch"
-          :aria-checked="noBadges"
-          class="group flex items-center gap-2 rounded-md text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-          data-testid="no-badges"
-          @click="onBadges"
-        >
-          <span
-            class="relative h-5 w-9 rounded-full border transition-colors"
-            :class="noBadges ? 'border-primary bg-primary' : 'bg-input/50'"
-            aria-hidden="true"
-          >
-            <span
-              class="absolute top-0.5 left-0.5 size-3.5 rounded-full bg-foreground transition-transform"
-              :class="noBadges ? 'translate-x-4 bg-primary-foreground' : ''"
-            />
-          </span>
-          No rating badges
-        </button>
-        <label v-if="hasLanguage" class="flex items-center gap-2 text-sm">
-          <span class="text-muted-foreground">Applies to</span>
-          <select
-            :value="scope"
-            class="h-9 rounded-md border bg-transparent px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
-            data-testid="scope"
-            :disabled="saving"
-            @change="onScope"
-          >
-            <option value="">Every language</option>
-            <option v-for="l in scopeOptions" :key="l" :value="l">Only {{ languageLabel(l) }}</option>
-          </select>
-        </label>
-        <div class="ml-auto flex flex-wrap items-center gap-2">
-          <Button
-            v-if="current"
-            variant="outline"
-            class="text-destructive hover:text-destructive"
-            :disabled="saving || uploading"
-            data-testid="clear"
-            @click="clear"
-          >
-            Clear override
-          </Button>
-          <Button variant="outline" :disabled="saving" @click="onOpenChange(false)">Cancel</Button>
-          <Button :disabled="!canSave" data-testid="save" @click="save">
-            <Loader2 v-if="saving" class="animate-spin" />
-            {{ saveLabel }}
-          </Button>
-        </div>
-      </div>
-      <p class="-mt-2 text-xs text-muted-foreground">
+      <p class="text-xs text-muted-foreground">
         Saving removes the cached renders of this {{ kindWord[kind] }}. It is drawn again the next time something requests it.
       </p>
+      </div>
+
+      <!-- footer: always visible -->
+      <div class="shrink-0 space-y-2 border-t bg-background px-4 py-3 sm:px-6" data-testid="footer">
+        <p v-if="actionError" role="alert" class="flex items-start gap-2 text-sm text-destructive" data-testid="action-error">
+          <TriangleAlert class="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          {{ actionError }}
+        </p>
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="noBadges"
+            class="group flex items-center gap-2 rounded-md text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+            data-testid="no-badges"
+            @click="onBadges"
+          >
+            <span
+              class="relative h-5 w-9 rounded-full border transition-colors"
+              :class="noBadges ? 'border-primary bg-primary' : 'bg-input/50'"
+              aria-hidden="true"
+            >
+              <span
+                class="absolute top-0.5 left-0.5 size-3.5 rounded-full bg-foreground transition-transform"
+                :class="noBadges ? 'translate-x-4 bg-primary-foreground' : ''"
+              />
+            </span>
+            No rating badges
+          </button>
+          <label v-if="hasLanguage" class="flex items-center gap-2 text-sm">
+            <span class="text-muted-foreground">Applies to</span>
+            <select
+              :value="scope"
+              class="h-9 rounded-md border bg-transparent px-2 text-sm outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+              data-testid="scope"
+              :disabled="saving"
+              @change="onScope"
+            >
+              <option value="">Every language</option>
+              <option v-for="l in scopeOptions" :key="l" :value="l">Only {{ languageLabel(l) }}</option>
+            </select>
+          </label>
+          <div class="ml-auto flex flex-wrap items-center gap-2">
+            <Button
+              v-if="current"
+              variant="outline"
+              class="text-destructive hover:text-destructive"
+              :disabled="saving || uploading"
+              data-testid="clear"
+              @click="clear"
+            >
+              Clear override
+            </Button>
+            <Button variant="outline" :disabled="saving" @click="onOpenChange(false)">Cancel</Button>
+            <Button :disabled="!canSave" data-testid="save" @click="save">
+              <Loader2 v-if="saving" class="animate-spin" />
+              {{ saveLabel }}
+            </Button>
+          </div>
+        </div>
+      </div>
     </DialogContent>
   </Dialog>
 </template>

@@ -9,7 +9,8 @@ import { withBust } from '@/louk/overrides'
 import { relativeTime } from '@/louk/format'
 
 // `bust`: bumped after an override change so the tile asks the server again instead of reusing the browser's copy.
-const props = defineProps<{ image: TitleImage; bust?: number }>()
+// `also`: other renders with the same settings under other ids of the title (shown as one tile).
+const props = defineProps<{ image: TitleImage; bust?: number; also?: TitleImage[] }>()
 const emit = defineEmits<{ view: [image: TitleImage]; purge: [image: TitleImage] }>()
 
 const root = ref<HTMLElement | null>(null)
@@ -24,6 +25,10 @@ const aspect = computed(() => {
   return 'aspect-video'
 })
 const fit = computed(() => (props.image.kind === 'logo' ? 'object-contain p-4' : 'object-cover'))
+// Logos are often black or white on transparent: a mid-grey checkerboard shows both.
+const logoBacking =
+  'background-color:#8b8b93;background-image:linear-gradient(45deg,#b5b5bd 25%,transparent 25%,transparent 75%,#b5b5bd 75%),linear-gradient(45deg,#b5b5bd 25%,transparent 25%,transparent 75%,#b5b5bd 75%);background-size:16px 16px;background-position:0 0,8px 8px'
+const alsoText = computed(() => (props.also ?? []).map((i) => i.id_type).join(', '))
 
 async function load() {
   if (state.value !== 'idle') return
@@ -68,6 +73,7 @@ onBeforeUnmount(() => {
       type="button"
       class="relative block w-full overflow-hidden rounded-md border bg-muted/60 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
       :class="aspect"
+      :style="image.kind === 'logo' ? logoBacking : undefined"
       :aria-label="`View ${image.kind} ${image.cache_value}`"
       :disabled="state === 'failed'"
       @click="emit('view', image)"
@@ -87,7 +93,8 @@ onBeforeUnmount(() => {
     <figcaption class="flex items-start justify-between gap-2">
       <div class="min-w-0">
         <p class="truncate font-mono text-xs" :title="image.cache_value">{{ image.cache_value }}</p>
-        <p class="text-xs text-muted-foreground">Cached {{ relativeTime(image.created_at) }}</p>
+        <p class="text-xs whitespace-nowrap text-muted-foreground">Cached {{ relativeTime(image.created_at) }}</p>
+        <p v-if="alsoText" class="text-xs text-muted-foreground" data-testid="also-cached">Also cached under {{ alsoText }}</p>
       </div>
       <div class="flex shrink-0 gap-0.5">
         <Button

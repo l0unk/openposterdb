@@ -9,6 +9,8 @@ import {
   checkUploadFile,
   deleteOverride,
   getCandidates,
+  getOverrides,
+  overrideLabel,
   previewUrl,
   putOverride,
   scoreLabel,
@@ -55,6 +57,12 @@ describe('louk overrides api', () => {
     expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/candidates/tv/62017/backdrop')
     await getCandidates(still)
     expect(fetchMock.mock.calls[2]![0]).toBe('/api/admin/louk/candidates/tv/62017/episode?season=1&episode=2')
+  })
+
+  it('getOverrides reads the rows of a title', async () => {
+    fetchMock.mockResolvedValue(res(200, { overrides: [{ kind: 'logo' }] }))
+    await expect(getOverrides('tv', 60622)).resolves.toEqual([{ kind: 'logo' }])
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/louk/overrides/tv/60622')
   })
 
   it('putOverride sends the JSON body of the contract', async () => {
@@ -129,6 +137,10 @@ describe('louk overrides api', () => {
     expect(scoreLabel({ source: 'tmdb', votes: 3.334, vote_count: 3, likes: null })).toBe('3.3 from 3 votes')
     expect(scoreLabel({ source: 'fanart', votes: null, vote_count: null, likes: 1 })).toBe('1 like')
     expect(scoreLabel({ source: 'fanart', votes: null, vote_count: null, likes: null })).toBeNull()
+    expect(scoreLabel({ source: 'tmdb', votes: 0, vote_count: 0, likes: null })).toBe('no votes')
+    expect(overrideLabel({ source: 'tmdb', lang: 'en', no_badges: false })).toBe('TMDB English (en)')
+    expect(overrideLabel({ source: 'auto', lang: null, no_badges: true })).toBe('Badges off')
+    expect(overrideLabel({ source: 'upload', lang: null, no_badges: true })).toBe('Upload, badges off')
     const t = { source: 'tmdb', thumb_url: 'https://image.tmdb.org/t/p/w300/a.png', full_url: 'https://image.tmdb.org/t/p/original/a.png' } as const
     expect(previewUrl(t, 'logo')).toBe('https://image.tmdb.org/t/p/w500/a.png')
     expect(previewUrl(t, 'backdrop')).toBe('https://image.tmdb.org/t/p/w780/a.png')
