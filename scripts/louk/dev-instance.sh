@@ -11,10 +11,13 @@
 # State lives in ~/opdb-dev (override with OPDB_DEV_HOME): cache/, db/, pid, server.log,
 # api-key (mode 600, never printed). The instance listens on 127.0.0.1:3900 (OPDB_DEV_PORT).
 #
-# The server starts in a CLEAN environment (env -i): nothing leaks in from the caller (no
-# MALLOC_ARENA_MAX, no OMDB_API_KEY). It always gets RATINGS_DISABLED=true and never gets OMDb /
-# MDBList / Trakt keys. Extra VAR=VALUE arguments are added on top of the defaults (they win).
-# Always run `stop` when you are done.
+# The server starts in a CLEAN environment (everything exported by the caller is unset in the
+# launching subshell, then only the values below are exported, then exec: no secret is ever on a
+# command line): nothing leaks in from the caller (no MALLOC_ARENA_MAX, no OMDB_API_KEY). It always
+# gets RATINGS_DISABLED=true and never gets OMDb / MDBList / Trakt keys. Extra VAR=VALUE arguments
+# are added on top of the defaults (they win). The server also carries OPDB_DEV_INSTANCE=<home> in
+# its environment: `stop` uses it to kill an orphan whose pidfile was lost, and to never kill a
+# reused pid. Always run `stop` when you are done.
 set -euo pipefail
 
 HOME_DIR="${OPDB_DEV_HOME:-$HOME/opdb-dev}"
@@ -30,11 +33,30 @@ ADMIN_PASS_FILE="$HOME_DIR/admin-password"
 
 die() { echo "dev-instance: $*" >&2; exit 1; }
 
+MARKER="OPDB_DEV_INSTANCE=$HOME_DIR"
+
+# True if pid is alive, ours, and carries this instance's marker (so a reused pid never matches).
+is_instance() {
+  local pid="$1"
+  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
+  tr '\0' '\n' 2>/dev/null < "/proc/$pid/environ" | grep -qxF "$MARKER"
+}
+
+# Pids of every own process carrying the marker (the pidfile pid or an orphan).
+instance_pids() {
+  local d pid
+  for d in /proc/[0-9]*; do
+    pid="${d#/proc/}"
+    [[ "$pid" == "$$" ]] && continue
+    [[ -O "$d" ]] || continue
+    is_instance "$pid" && echo "$pid"
+  done
+  return 0
+}
+
 is_running() {
   [[ -f "$PIDFILE" ]] || return 1
-  local pid
-  pid="$(cat "$PIDFILE")"
-  [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
+  is_instance "$(cat "$PIDFILE")"
 }
 
 cmd_start() {
@@ -43,8 +65,11 @@ cmd_start() {
   shift
   [[ -x "$bin" ]] || die "binary not found or not executable: $bin"
   is_running && die "already running (pid $(cat "$PIDFILE")); run stop first"
+  local orphans
+  orphans="$(instance_pids | tr '\n' ' ')"
+  [[ -z "${orphans// /}" ]] || die "an instance is still running without a pidfile (pid $orphans); run stop first"
   if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
-    die "port $PORT is already in use by something else"
+    die "port $PORT is already in use by something that is not this instance (stop found none)"
   fi
   [[ -r "$ENV_FILE" ]] || die "missing $ENV_FILE"
   mkdir -p "$HOME_DIR/cache" "$HOME_DIR/db"
@@ -58,6 +83,7 @@ cmd_start() {
     case "$name" in
       OMDB_API_KEY|MDBLIST_API_KEY|TRAKT_CLIENT_ID) die "$name is never passed to the dev instance" ;;
       TMDB_API_KEY|FANART_API_KEY|JWT_SECRET) die "$name is set by the script; do not pass it" ;;
+      RATINGS_DISABLED|OPDB_DEV_INSTANCE) die "$name is forced by the script; do not pass it" ;;
     esac
     extra+=("$kv")
   done
@@ -74,24 +100,29 @@ cmd_start() {
     "LISTEN_ADDR=127.0.0.1:$PORT"
     "CACHE_DIR=$HOME_DIR/cache" "DB_DIR=$HOME_DIR/db"
     "STATIC_DIR=web/dist" "COOKIE_SECURE=false" "RATINGS_DISABLED=true"
-    "JWT_SECRET=$jwt" "TMDB_API_KEY=$tmdb"
+    "JWT_SECRET=$jwt" "TMDB_API_KEY=$tmdb" "$MARKER"
   )
   [[ -n "$fanart" ]] && envargs+=("FANART_API_KEY=$fanart")
-  # Later assignments win in env(1): extras override the defaults above.
+  # Later assignments win (exported in order): extras override the defaults above.
   envargs+=("${extra[@]}")
 
   : > "$LOG"
   chmod 600 "$LOG"
-  # exec chain (nice -> env -> binary) keeps $! == the server's pid.
+  # exec chain (subshell -> nohup -> nice -> binary) keeps $! == the server's pid.
   (
     cd "$ROOT"
-    exec nohup nice -n "${OPDB_DEV_NICE:-19}" env -i "${envargs[@]}" "$bin" </dev/null >>"$LOG" 2>&1
+    # Clean environment without putting values on any argv (env -i would show them in ps).
+    while IFS= read -r v; do unset "$v" 2>/dev/null || true; done < <(compgen -e)
+    while read -r _ _ v; do unset -f "$v" 2>/dev/null || true; done < <(declare -Fx)
+    for kv in "${envargs[@]}"; do export "$kv"; done
+    exec nohup nice -n "${OPDB_DEV_NICE:-19}" "$bin" </dev/null >>"$LOG" 2>&1
   ) &
   local pid=$!
   echo "$pid" > "$PIDFILE"
 
-  local i
-  for i in $(seq 1 120); do
+  # Up to 60 s (SECONDS deadline; each probe is at most 2 s on top).
+  SECONDS=0
+  while (( SECONDS < 60 )); do
     if ! kill -0 "$pid" 2>/dev/null; then
       rm -f "$PIDFILE"
       echo "dev-instance: server exited during startup; last log lines:" >&2
@@ -149,13 +180,17 @@ cmd_bootstrap() {
 }
 
 cmd_stop() {
-  if is_running; then
-    local pid
-    pid="$(cat "$PIDFILE")"
-    kill "$pid" 2>/dev/null || true
-    for _ in $(seq 1 50); do kill -0 "$pid" 2>/dev/null || break; sleep 0.2; done
-    kill -9 "$pid" 2>/dev/null || true
-    echo "dev-instance: stopped pid $pid"
+  # The pidfile pid (if it is really this instance) plus any orphan carrying the marker.
+  local pids pid
+  pids="$(instance_pids | tr '\n' ' ')"
+  if [[ -n "${pids// /}" ]]; then
+    for pid in $pids; do kill "$pid" 2>/dev/null || true; done
+    for _ in $(seq 1 50); do
+      [[ -z "$(instance_pids)" ]] && break
+      sleep 0.2
+    done
+    for pid in $(instance_pids); do kill -9 "$pid" 2>/dev/null || true; done
+    echo "dev-instance: stopped pid $pids"
   else
     echo "dev-instance: not running"
   fi
