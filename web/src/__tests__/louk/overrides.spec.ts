@@ -12,6 +12,7 @@ import {
   previewUrl,
   putOverride,
   scoreLabel,
+  shadowNote,
   targetQuery,
   uploadImage,
   withBust,
@@ -26,8 +27,8 @@ function res(status: number, body: unknown = {}) {
   }
 }
 
-const logo = { mediaType: 'tv', tmdbId: 60622, kind: 'logo' } as const
-const still = { mediaType: 'tv', tmdbId: 60622, kind: 'episode', season: 1, episode: 2 } as const
+const logo = { mediaType: 'tv', tmdbId: 62017, kind: 'logo' } as const
+const still = { mediaType: 'tv', tmdbId: 62017, kind: 'episode', season: 1, episode: 2 } as const
 
 describe('louk overrides api', () => {
   const fetchMock = vi.fn()
@@ -49,23 +50,23 @@ describe('louk overrides api', () => {
   it('getCandidates calls the candidates route, with lang for logos and posters only', async () => {
     fetchMock.mockResolvedValue(res(200, { candidates: [] }))
     await getCandidates(logo, 'pt-BR')
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/louk/candidates/tv/60622/logo?lang=pt-BR')
-    await getCandidates({ mediaType: 'tv', tmdbId: 60622, kind: 'backdrop' }, 'en')
-    expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/candidates/tv/60622/backdrop')
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/louk/candidates/tv/62017/logo?lang=pt-BR')
+    await getCandidates({ mediaType: 'tv', tmdbId: 62017, kind: 'backdrop' }, 'en')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/candidates/tv/62017/backdrop')
     await getCandidates(still)
-    expect(fetchMock.mock.calls[2]![0]).toBe('/api/admin/louk/candidates/tv/60622/episode?season=1&episode=2')
+    expect(fetchMock.mock.calls[2]![0]).toBe('/api/admin/louk/candidates/tv/62017/episode?season=1&episode=2')
   })
 
   it('putOverride sends the JSON body of the contract', async () => {
     fetchMock.mockResolvedValue(res(200, { override: {}, purge: {} }))
     await putOverride(logo, { source: 'tmdb', value: '/gd.png', no_badges: false })
     const [url, init] = fetchMock.mock.calls[0]!
-    expect(url).toBe('/api/admin/louk/overrides/tv/60622/logo')
+    expect(url).toBe('/api/admin/louk/overrides/tv/62017/logo')
     expect(init.method).toBe('PUT')
     expect(JSON.parse(init.body)).toEqual({ source: 'tmdb', value: '/gd.png', no_badges: false })
 
     await putOverride(still, { source: 'auto', no_badges: true })
-    expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/overrides/tv/60622/episode?season=1&episode=2')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/overrides/tv/62017/episode?season=1&episode=2')
     expect(JSON.parse(fetchMock.mock.calls[1]![1].body)).toEqual({ source: 'auto', no_badges: true })
   })
 
@@ -77,7 +78,7 @@ describe('louk overrides api', () => {
   it('deleteOverride calls DELETE on the key', async () => {
     fetchMock.mockResolvedValue(res(200, { deleted: true, purge: null }))
     await deleteOverride(still)
-    expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/louk/overrides/tv/60622/episode?season=1&episode=2')
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/louk/overrides/tv/62017/episode?season=1&episode=2')
     expect(fetchMock.mock.calls[0]![1].method).toBe('DELETE')
     await deleteOverride({ mediaType: 'movie', tmdbId: 603, kind: 'poster' }, 'pt')
     expect(fetchMock.mock.calls[1]![0]).toBe('/api/admin/louk/overrides/movie/603/poster?lang=pt')
@@ -111,6 +112,17 @@ describe('louk overrides api', () => {
     expect(checkUploadFile({ name: 'a.svg', type: 'image/svg+xml', size: 10 })).toMatch(/PNG, JPEG and WebP/)
     expect(checkUploadFile({ name: 'a.png', type: 'image/png', size: MAX_UPLOAD_BYTES + 1 })).toMatch(/limited to 15 MB/)
     expect(checkUploadFile({ name: 'a.png', type: 'image/png', size: 0 })).toMatch(/empty/)
+    // No MIME type (some drag sources): the extension decides, the server sniffs.
+    expect(checkUploadFile({ name: 'logo.webp', type: '', size: 10 })).toBeNull()
+    expect(checkUploadFile({ name: 'logo.JPG', type: '', size: 10 })).toBeNull()
+    expect(checkUploadFile({ name: 'logo.gif', type: '', size: 10 })).toMatch(/PNG, JPEG and WebP/)
+  })
+
+  it('shadowNote names the language rows that still win', () => {
+    expect(shadowNote(undefined)).toBe('')
+    expect(shadowNote([])).toBe('')
+    expect(shadowNote([{ lang: 'en' }])).toMatch(/^ The override for .*en.* still wins for those requests; clear it/)
+    expect(shadowNote([{ lang: 'en' }, { lang: 'de' }])).toMatch(/overrides for .*en.*de.* still win/)
   })
 
   it('formats scores, preview sizes and cache-busting', () => {

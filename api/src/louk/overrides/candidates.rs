@@ -8,15 +8,18 @@
 //! votes keep TMDB's/fanart's own order (a stable sort, first of equals
 //! first; upstream's `max_by` picks the LAST of equals).
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use super::{OverrideSource, is_tmdb_file_path};
 use crate::AppState;
 use crate::cache::ImageType;
+use crate::error::AppError;
 use crate::id::{self, IdType, MediaType, ResolvedId};
 use crate::services::fanart::{FanartClient, FanartPoster};
 use crate::services::lang::lang_base;
-use crate::services::tmdb::{TmdbClient, TmdbImage};
+use crate::services::tmdb::{TmdbClient, TmdbImage, TmdbImagesResponse};
 
 pub const TMDB_THUMB: &str = "https://image.tmdb.org/t/p/w300";
 pub const TMDB_FULL: &str = "https://image.tmdb.org/t/p/original";
@@ -129,7 +132,7 @@ pub fn fanart_candidates(images: &[FanartPoster]) -> Vec<Candidate> {
         .filter(|p| super::is_fanart_url(&p.url) && super::is_fanart_id(&p.id))
         .map(|p| Candidate {
             source: "fanart",
-            value: p.url.clone(),
+            value: super::normalize_fanart_url(&p.url),
             fanart_id: Some(p.id.clone()),
             lang: Some(p.lang.clone()).filter(|l| !l.is_empty() && l != "00"),
             votes: None,
@@ -137,8 +140,8 @@ pub fn fanart_candidates(images: &[FanartPoster]) -> Vec<Candidate> {
             likes: Some(p.likes.parse::<i64>().unwrap_or(0)),
             width: None,
             height: None,
-            thumb_url: fanart_preview_url(&p.url),
-            full_url: p.url.clone(),
+            thumb_url: fanart_preview_url(&super::normalize_fanart_url(&p.url)),
+            full_url: super::normalize_fanart_url(&p.url),
             auto: false,
             current: false,
         })
@@ -172,57 +175,87 @@ pub fn sort_candidates(c: &mut [Candidate], req_lang: &str) {
     });
 }
 
-/// Upstream's automatic TMDB pick for a TMDB-preferred key (default `lang`
-/// handling, not textless), as a `file_path`.
-pub fn auto_tmdb(
+/// The automatic pick of a TMDB-preferred key in `lang` (not textless),
+/// computed exactly as the render path does it, from the same inputs:
+/// `primary` = TMDB `/images` filtered to `{lang base},null` (for backdrops
+/// `null` only), `en` = the same for `en` (logo fallback), the fanart list
+/// of the kind, and `default_path` = the details `poster_path` (posters) or
+/// the episode's `still_path` (stills). Upstream's own `select_*` functions
+/// run on those lists, so ties (e.g. three 0-vote logos) resolve the same.
+///
+/// - poster: `en` → `default_path`; else TMDB(lang) → fanart(lang) → `default_path`
+///   (`generate_poster_with_source`);
+/// - logo: TMDB(lang) → fanart(lang) → TMDB(`en`) when `lang` is not `en`
+///   (`handle_logo_backdrop_inner`);
+/// - backdrop: TMDB(language-less) → fanart;
+/// - still: `default_path`.
+pub fn auto_pick(
     kind: ImageType,
-    images: &[TmdbImageFull],
     lang: &str,
+    primary: Option<&TmdbImagesResponse>,
+    en: Option<&TmdbImagesResponse>,
+    fanart: &[FanartPoster],
     default_path: Option<&str>,
-) -> Option<String> {
-    let up: Vec<TmdbImage> = images.iter().map(TmdbImageFull::as_upstream).collect();
+) -> Option<OverrideSource> {
+    let tmdb = |path: &str| OverrideSource::Tmdb {
+        file_path: path.to_owned(),
+    };
+    let fan = |lang: &str| {
+        FanartClient::select_image(fanart, lang, false).map(|(p, _)| OverrideSource::Fanart {
+            id: p.id.clone(),
+            url: super::normalize_fanart_url(&p.url),
+        })
+    };
     match kind {
-        // `generate_poster_with_source`: lang=en → the details poster_path;
-        // other languages → select_poster, falling back to poster_path.
         ImageType::Poster => {
             if lang == "en" {
-                default_path.map(str::to_owned)
-            } else {
-                TmdbClient::select_poster(&up, lang, false)
-                    .map(|i| i.file_path.clone())
-                    .or_else(|| default_path.map(str::to_owned))
+                return default_path.map(tmdb);
             }
+            primary
+                .and_then(|r| TmdbClient::select_poster(&r.posters, lang, false))
+                .map(|i| tmdb(&i.file_path))
+                .or_else(|| fan(lang))
+                .or_else(|| default_path.map(tmdb))
         }
-        // `try_tmdb_logo_backdrop` (+ the en fallback for logos).
-        ImageType::Logo => TmdbClient::select_image(&up, lang, false)
+        ImageType::Logo => primary
+            .and_then(|r| TmdbClient::select_image(&r.logos, lang, false))
+            .map(|i| tmdb(&i.file_path))
+            .or_else(|| fan(lang))
             .or_else(|| {
-                if lang != "en" {
-                    TmdbClient::select_image(&up, "en", false)
-                } else {
-                    None
+                if lang == "en" {
+                    return None;
                 }
-            })
-            .map(|i| i.file_path.clone()),
-        ImageType::Backdrop => {
-            TmdbClient::select_image(&up, "", false).map(|i| i.file_path.clone())
-        }
-        // Episodes use the episode's own still_path.
-        ImageType::Episode => default_path.map(str::to_owned),
+                en.and_then(|r| TmdbClient::select_image(&r.logos, "en", false))
+                    .map(|i| tmdb(&i.file_path))
+            }),
+        ImageType::Backdrop => primary
+            .and_then(|r| TmdbClient::select_image(&r.backdrops, "", false))
+            .map(|i| tmdb(&i.file_path))
+            .or_else(|| fan("")),
+        ImageType::Episode => default_path.map(tmdb),
     }
 }
 
-/// Upstream's fanart pick (used when TMDB has nothing for logos/backdrops).
-pub fn auto_fanart(
-    kind: ImageType,
-    images: &[FanartPoster],
+/// TMDB `/images` filtered to one language, through upstream's
+/// `tmdb_images_cache` with upstream's key, so it is the very response the
+/// render path selects from (`serve::get_tmdb_images_cached`).
+async fn filtered_images(
+    state: &AppState,
+    media_type: &'static str,
+    tmdb_id: u64,
     lang: &str,
-) -> Option<(String, String)> {
-    let lang = if kind == ImageType::Backdrop {
-        ""
-    } else {
-        lang
-    };
-    FanartClient::select_image(images, lang, false).map(|(p, _)| (p.id.clone(), p.url.clone()))
+) -> Option<Arc<TmdbImagesResponse>> {
+    let key = format!("{media_type}:{tmdb_id}:{}", lang_base(lang));
+    let tmdb = state.tmdb.clone();
+    let lang = lang.to_owned();
+    state
+        .tmdb_images_cache
+        .try_get_with(key, async move {
+            let imgs = tmdb.get_images(media_type, tmdb_id, &lang).await?;
+            Ok::<_, AppError>(Arc::new(imgs))
+        })
+        .await
+        .ok()
 }
 
 /// Set the `auto` and `current` marks.
@@ -320,11 +353,9 @@ pub async fn list(
     }
 
     let mut out = tmdb_candidates(&tmdb);
-    let mut auto = auto_tmdb(kind, &tmdb, lang, default_path.as_deref())
-        .filter(|p| is_tmdb_file_path(p))
-        .map(|file_path| OverrideSource::Tmdb { file_path });
 
     // fanart.tv has posters, logos and backdrops (no stills).
+    let mut fanart_list: Vec<FanartPoster> = Vec::new();
     if kind != ImageType::Episode {
         if let Some(fc) = state.fanart.as_ref() {
             let r = resolved.unwrap_or_else(|| ResolvedId {
@@ -344,24 +375,50 @@ pub async fn list(
                 .await
             {
                 Some(imgs) => {
-                    let list = match kind {
-                        ImageType::Poster => &imgs.posters,
-                        ImageType::Logo => &imgs.logos,
-                        _ => &imgs.backdrops,
+                    fanart_list = match kind {
+                        ImageType::Poster => imgs.posters.clone(),
+                        ImageType::Logo => imgs.logos.clone(),
+                        _ => imgs.backdrops.clone(),
                     };
-                    if auto.is_none() && kind != ImageType::Poster {
-                        auto = auto_fanart(kind, list, lang)
-                            .filter(|(id, url)| {
-                                super::is_fanart_id(id) && super::is_fanart_url(url)
-                            })
-                            .map(|(id, url)| OverrideSource::Fanart { id, url });
-                    }
-                    out.extend(fanart_candidates(list));
+                    out.extend(fanart_candidates(&fanart_list));
                 }
                 None => errors.push("fanart: images unavailable".into()),
             }
         }
     }
+
+    // The automatic pick, from the same filtered lists the render path uses.
+    let (primary, en) = match kind {
+        ImageType::Episode => (None, None),
+        ImageType::Backdrop => (filtered_images(state, media_type, tmdb_id, "").await, None),
+        ImageType::Poster if lang == "en" => (None, None),
+        ImageType::Poster => (
+            filtered_images(state, media_type, tmdb_id, lang).await,
+            None,
+        ),
+        ImageType::Logo => {
+            let primary = filtered_images(state, media_type, tmdb_id, lang).await;
+            let en = if lang != "en" {
+                filtered_images(state, media_type, tmdb_id, "en").await
+            } else {
+                None
+            };
+            (primary, en)
+        }
+    };
+    let auto = auto_pick(
+        kind,
+        lang,
+        primary.as_deref(),
+        en.as_deref(),
+        &fanart_list,
+        default_path.as_deref(),
+    )
+    .filter(|s| match s {
+        OverrideSource::Tmdb { file_path } => is_tmdb_file_path(file_path),
+        OverrideSource::Fanart { id, url } => super::is_fanart_id(id) && super::is_fanart_url(url),
+        _ => false,
+    });
 
     let req_lang = if matches!(kind, ImageType::Poster | ImageType::Logo) {
         lang
@@ -409,17 +466,27 @@ mod tests {
         let mut c = tmdb_candidates(&logos);
         sort_candidates(&mut c, "en");
         assert_eq!(values(&c), ["/first.png", "/second.png", "/third.png"]);
-        // Upstream's automatic pick is the LAST of equals (max_by); marked as such.
-        let auto = auto_tmdb(ImageType::Logo, &logos, "en", None).unwrap();
-        assert_eq!(auto, "/third.png");
-        mark(
-            &mut c,
-            Some(&OverrideSource::Tmdb { file_path: auto }),
-            None,
+        // Upstream's automatic pick is the LAST of equals (max_by) of the
+        // FILTERED response the render path selects from, which TMDB may order
+        // differently from the unfiltered candidate list.
+        let filtered = resp(vec![
+            img("/second.png", Some("en"), 0.0),
+            img("/third.png", Some("en"), 0.0),
+            img("/first.png", Some("en"), 0.0),
+        ]);
+        let auto = auto_pick(ImageType::Logo, "en", Some(&filtered), None, &[], None).unwrap();
+        let served = TmdbClient::select_image(&filtered.logos, "en", false).unwrap();
+        assert_eq!(
+            auto,
+            OverrideSource::Tmdb {
+                file_path: served.file_path.clone()
+            }
         );
+        assert_eq!(auto.value(), "/first.png");
+        mark(&mut c, Some(&auto), None);
         assert_eq!(
             c.iter().map(|x| x.auto).collect::<Vec<_>>(),
-            [false, false, true]
+            [true, false, false]
         );
     }
 
@@ -478,33 +545,118 @@ mod tests {
         assert_eq!(tm.thumb_url, "https://image.tmdb.org/t/p/w300/fr.png");
     }
 
+    fn resp(logos: Vec<TmdbImageFull>) -> TmdbImagesResponse {
+        TmdbImagesResponse {
+            backdrops: Vec::new(),
+            logos: logos.iter().map(TmdbImageFull::as_upstream).collect(),
+            posters: Vec::new(),
+        }
+    }
+
+    fn fanart(id: &str, lang: &str, likes: &str) -> FanartPoster {
+        FanartPoster {
+            id: id.into(),
+            url: format!("http://assets.fanart.tv/fanart/{id}.png"),
+            lang: lang.into(),
+            likes: likes.into(),
+        }
+    }
+
     #[test]
     fn auto_pick_per_kind() {
-        let posters = vec![
-            img("/p-de.jpg", Some("de"), 5.0),
-            img("/p-en.jpg", Some("en"), 5.0),
-        ];
+        let tmdb = |p: &str| OverrideSource::Tmdb {
+            file_path: p.into(),
+        };
+        // Posters: en = the details poster_path; other languages from the
+        // filtered list, then fanart, then the details poster.
+        let mut posters = TmdbImagesResponse {
+            backdrops: vec![],
+            logos: vec![],
+            posters: vec![],
+        };
         assert_eq!(
-            auto_tmdb(ImageType::Poster, &posters, "en", Some("/details.jpg")).as_deref(),
-            Some("/details.jpg")
+            auto_pick(
+                ImageType::Poster,
+                "en",
+                Some(&posters),
+                None,
+                &[],
+                Some("/details.jpg")
+            ),
+            Some(tmdb("/details.jpg"))
         );
-        let backdrops = vec![
-            img("/b1.jpg", None, 1.0),
-            img("/b2.jpg", None, 4.0),
-            img("/b-en.jpg", Some("en"), 9.0),
-        ];
         assert_eq!(
-            auto_tmdb(ImageType::Backdrop, &backdrops, "en", None).as_deref(),
-            Some("/b2.jpg")
+            auto_pick(
+                ImageType::Poster,
+                "de",
+                Some(&posters),
+                None,
+                &[],
+                Some("/details.jpg")
+            ),
+            Some(tmdb("/details.jpg"))
         );
-        let logos = vec![img("/l-en.png", Some("en"), 1.0)];
+        let fan = [fanart("7", "de", "3")];
+        let got = auto_pick(
+            ImageType::Poster,
+            "de",
+            Some(&posters),
+            None,
+            &fan,
+            Some("/details.jpg"),
+        )
+        .unwrap();
         assert_eq!(
-            auto_tmdb(ImageType::Logo, &logos, "de", None).as_deref(),
-            Some("/l-en.png")
+            (got.name(), got.value()),
+            ("fanart", "https://assets.fanart.tv/fanart/7.png")
+        );
+        posters.posters = vec![img("/p-de.jpg", Some("de"), 5.0).as_upstream()];
+        assert_eq!(
+            auto_pick(ImageType::Poster, "de", Some(&posters), None, &fan, None),
+            Some(tmdb("/p-de.jpg"))
+        );
+        // Backdrops: language-less TMDB first.
+        let backdrops = TmdbImagesResponse {
+            backdrops: vec![
+                img("/b1.jpg", None, 1.0).as_upstream(),
+                img("/b2.jpg", None, 4.0).as_upstream(),
+            ],
+            logos: vec![],
+            posters: vec![],
+        };
+        assert_eq!(
+            auto_pick(ImageType::Backdrop, "en", Some(&backdrops), None, &[], None),
+            Some(tmdb("/b2.jpg"))
+        );
+        // Logos: TMDB(lang) → fanart(lang) → TMDB(en).
+        let none = resp(vec![]);
+        let en = resp(vec![img("/l-en.png", Some("en"), 1.0)]);
+        assert_eq!(
+            auto_pick(ImageType::Logo, "de", Some(&none), Some(&en), &[], None),
+            Some(tmdb("/l-en.png"))
+        );
+        let fan_de = [fanart("9", "de", "1")];
+        assert_eq!(
+            auto_pick(ImageType::Logo, "de", Some(&none), Some(&en), &fan_de, None)
+                .unwrap()
+                .name(),
+            "fanart"
         );
         assert_eq!(
-            auto_tmdb(ImageType::Episode, &[], "en", Some("/still.jpg")).as_deref(),
-            Some("/still.jpg")
+            auto_pick(ImageType::Logo, "en", Some(&none), None, &[], None),
+            None
+        );
+        // Stills: the episode's still_path.
+        assert_eq!(
+            auto_pick(
+                ImageType::Episode,
+                "en",
+                None,
+                None,
+                &[],
+                Some("/still.jpg")
+            ),
+            Some(tmdb("/still.jpg"))
         );
     }
 }

@@ -17,7 +17,12 @@ pub const MAX_UPLOAD_BYTES: usize = 15 * 1024 * 1024;
 /// Largest accepted width or height.
 pub const MAX_SIDE: u32 = 8000;
 /// Decoder allocation cap: an 8000x8000 RGBA image plus slack.
-const MAX_DECODE_ALLOC: u64 = (MAX_SIDE as u64) * (MAX_SIDE as u64) * 4 + 16 * 1024 * 1024;
+const MAX_DECODE_ALLOC: u64 = 8192 * 8192 * 4;
+/// Uploads larger than this on their long side also get a downscaled copy
+/// (`<sha256>.r.<png|jpg>`) that the render path decodes instead of the
+/// original: no render is wider than 3840 px (very large backdrops), and an
+/// 8000 px original would cost ~256 MB per decode.
+pub const RENDER_MAX_SIDE: u32 = 3840;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UploadFormat {
@@ -134,6 +139,13 @@ fn limits() -> Limits {
 /// Check size, magic bytes, header dimensions and a full decode (in that
 /// order, cheapest first). CPU-bound: call from a blocking thread.
 pub fn validate(bytes: &[u8]) -> Result<(UploadFormat, u32, u32), UploadError> {
+    validate_decoded(bytes).map(|(f, w, h, _)| (f, w, h))
+}
+
+/// [`validate`], keeping the decoded image (decoded once per upload).
+fn validate_decoded(
+    bytes: &[u8],
+) -> Result<(UploadFormat, u32, u32, image::DynamicImage), UploadError> {
     if bytes.len() > MAX_UPLOAD_BYTES {
         return Err(UploadError::TooLarge);
     }
@@ -150,10 +162,68 @@ pub fn validate(bytes: &[u8]) -> Result<(UploadFormat, u32, u32), UploadError> {
     }
     let mut reader = ImageReader::with_format(Cursor::new(bytes), format.image_format());
     reader.limits(limits());
-    reader
+    let img = reader
         .decode()
         .map_err(|e| UploadError::Undecodable(e.to_string()))?;
-    Ok((format, width, height))
+    Ok((format, width, height, img))
+}
+
+/// The downscaled render copy of an image whose long side is over
+/// [`RENDER_MAX_SIDE`] (JPEG stays JPEG, anything else becomes PNG so
+/// transparency survives), with its extension; `None` when not needed.
+fn render_copy(img: image::DynamicImage, format: UploadFormat) -> Option<(Vec<u8>, &'static str)> {
+    if img.width().max(img.height()) <= RENDER_MAX_SIDE {
+        return None;
+    }
+    let small = img.resize(
+        RENDER_MAX_SIDE,
+        RENDER_MAX_SIDE,
+        image::imageops::FilterType::Triangle,
+    );
+    drop(img);
+    let mut out = Vec::new();
+    let ext = if format == UploadFormat::Jpeg {
+        let enc = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 92);
+        small.to_rgb8().write_with_encoder(enc).ok()?;
+        "jpg"
+    } else {
+        small
+            .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+            .ok()?;
+        "png"
+    };
+    Some((out, ext))
+}
+
+/// Path of an upload's render copy, if it exists.
+pub async fn find_render_copy(db_dir: &str, sha256: &str) -> Option<PathBuf> {
+    if !is_sha256_hex(sha256) {
+        return None;
+    }
+    for ext in ["png", "jpg"] {
+        let path = uploads_dir(db_dir).join(format!("{sha256}.r.{ext}"));
+        if tokio::fs::metadata(&path)
+            .await
+            .map(|m| m.is_file())
+            .unwrap_or(false)
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+async fn write_atomically(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), UploadError> {
+    let tmp = dir.join(format!(".{}.tmp", rand::random::<u64>()));
+    if let Err(e) = tokio::fs::write(&tmp, bytes).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(UploadError::Io(e.to_string()));
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, path).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(UploadError::Io(e.to_string()));
+    }
+    Ok(())
 }
 
 pub fn is_sha256_hex(s: &str) -> bool {
@@ -188,7 +258,10 @@ pub async fn find_upload(db_dir: &str, sha256: &str) -> Option<(PathBuf, UploadF
 
 /// Read an upload's bytes (render path: `None` when missing, logged).
 pub async fn read_upload(db_dir: &str, sha256: &str) -> Option<Vec<u8>> {
-    let (path, _) = find_upload(db_dir, sha256).await?;
+    let path = match find_render_copy(db_dir, sha256).await {
+        Some(p) => p,
+        None => find_upload(db_dir, sha256).await?.0,
+    };
     match tokio::fs::read(&path).await {
         Ok(b) => Some(b),
         Err(e) => {
@@ -215,12 +288,12 @@ pub async fn save_upload(db_dir: &str, bytes: Vec<u8>) -> Result<SavedUpload, Up
         return Err(UploadError::TooLarge);
     }
     let (bytes, checked) = tokio::task::spawn_blocking(move || {
-        let r = validate(&bytes);
+        let r = validate_decoded(&bytes).map(|(f, w, h, img)| (f, w, h, render_copy(img, f)));
         (bytes, r)
     })
     .await
     .map_err(|e| UploadError::Io(e.to_string()))?;
-    let (format, width, height) = checked?;
+    let (format, width, height, copy) = checked?;
     let sha256 = sha256_hex(&bytes);
     let path =
         upload_path(db_dir, &sha256, format).ok_or_else(|| UploadError::Io("bad name".into()))?;
@@ -243,15 +316,11 @@ pub async fn save_upload(db_dir: &str, bytes: Vec<u8>) -> Result<SavedUpload, Up
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| UploadError::Io(e.to_string()))?;
-    let tmp = dir.join(format!(".{sha256}.{}.tmp", rand::random::<u64>()));
-    if let Err(e) = tokio::fs::write(&tmp, &bytes).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(UploadError::Io(e.to_string()));
+    // The render copy first: an original on disk implies its copy is there.
+    if let Some((copy, ext)) = copy {
+        write_atomically(&dir, &dir.join(format!("{sha256}.r.{ext}")), &copy).await?;
     }
-    if let Err(e) = tokio::fs::rename(&tmp, &path).await {
-        let _ = tokio::fs::remove_file(&tmp).await;
-        return Err(UploadError::Io(e.to_string()));
-    }
+    write_atomically(&dir, &path, &bytes).await?;
     Ok(SavedUpload {
         sha256,
         format,
@@ -346,6 +415,28 @@ pub(crate) mod tests {
             upload_path("/db", &"a".repeat(64), UploadFormat::Jpeg).unwrap(),
             PathBuf::from(format!("/db/uploads/{}.jpg", "a".repeat(64)))
         );
+    }
+
+    #[tokio::test]
+    async fn large_upload_gets_render_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_dir = dir.path().to_str().unwrap();
+        let bytes = png(4000, 20);
+        let saved = save_upload(db_dir, bytes.clone()).await.unwrap();
+        assert_eq!((saved.width, saved.height), (4000, 20));
+        let copy = find_render_copy(db_dir, &saved.sha256)
+            .await
+            .expect("render copy");
+        assert!(copy.to_str().unwrap().ends_with(".r.png"));
+        // The render path reads the copy; the admin route serves the original.
+        let rendered = read_upload(db_dir, &saved.sha256).await.unwrap();
+        let img = image::load_from_memory(&rendered).unwrap();
+        assert_eq!(img.width(), RENDER_MAX_SIDE);
+        let (orig, _) = find_upload(db_dir, &saved.sha256).await.unwrap();
+        assert_eq!(std::fs::read(orig).unwrap(), bytes);
+        // Small uploads have none.
+        let small = save_upload(db_dir, png(64, 64)).await.unwrap();
+        assert!(find_render_copy(db_dir, &small.sha256).await.is_none());
     }
 
     #[tokio::test]

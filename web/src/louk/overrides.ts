@@ -150,7 +150,7 @@ export async function putOverride(
   t: OverrideTarget,
   body: OverrideBody,
   lang?: string | null,
-): Promise<{ override: Override; purge: PurgeResult }> {
+): Promise<{ override: Override; purge: PurgeResult; shadowed_by?: Override[] }> {
   const res = await ok(await put(`${BASE}/overrides/${route(t)}${targetQuery(t, kindHasLanguage(t.kind) ? lang : null)}`, body))
   return res.json()
 }
@@ -166,7 +166,9 @@ export async function deleteOverride(
 /** Client-side mirror of the server's upload rules; returns a message, or null when the file is acceptable. */
 export function checkUploadFile(file: Pick<File, 'type' | 'size' | 'name'>): string | null {
   const type = file.type.toLowerCase()
-  if (!(UPLOAD_TYPES as readonly string[]).includes(type)) {
+  // Some drag sources give no MIME type: judge by the extension then (the server sniffs the bytes anyway).
+  const byName = /\.(png|jpe?g|webp)$/i.test(file.name)
+  if (type ? !(UPLOAD_TYPES as readonly string[]).includes(type) : !byName) {
     return 'Only PNG, JPEG and WebP images can be uploaded.'
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -187,7 +189,7 @@ export async function uploadImage(file: File): Promise<UploadResult> {
     const headers = new Headers()
     if (auth.token) headers.set('Authorization', `Bearer ${auth.token}`)
     headers.set('Content-Type', file.type || 'application/octet-stream')
-    return fetch(`${base}${BASE}/uploads`, { method: 'POST', headers, body: file, credentials: 'include' })
+    return fetch(`${base}${BASE}/uploads`, { method: 'POST', headers, body: file })
   }
   let res = await send()
   if (res.status === 401 && auth.token && (await auth.refresh())) res = await send()
@@ -212,6 +214,19 @@ const LANG_NAMES = (() => {
 })()
 
 /** "English (en)", "No language" for null. */
+/**
+ * Sentence for a PUT response whose row is overridden by more specific language rows
+ * (`shadowed_by`), or '' when nothing shadows it.
+ */
+export function shadowNote(shadowedBy: Pick<Override, 'lang'>[] | undefined): string {
+  const langs = (shadowedBy ?? []).map((o) => o.lang).filter((l): l is string => !!l)
+  if (!langs.length) return ''
+  const names = langs.map((l) => languageLabel(l)).join(', ')
+  return langs.length === 1
+    ? ` The override for ${names} still wins for those requests; clear it to use this one there too.`
+    : ` The overrides for ${names} still win for those requests; clear them to use this one there too.`
+}
+
 export function languageLabel(lang: string | null | undefined): string {
   if (!lang) return 'No language'
   let name: string | undefined

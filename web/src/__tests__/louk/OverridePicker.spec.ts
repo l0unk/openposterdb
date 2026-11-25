@@ -27,8 +27,8 @@ const stubs = {
   DialogDescription: { template: '<p><slot /></p>' },
 }
 
-const logoTarget = { mediaType: 'tv', tmdbId: 60622, kind: 'logo' } as const
-const stillTarget = { mediaType: 'tv', tmdbId: 60622, kind: 'episode', season: 1, episode: 2 } as const
+const logoTarget = { mediaType: 'tv', tmdbId: 62017, kind: 'logo' } as const
+const stillTarget = { mediaType: 'tv', tmdbId: 62017, kind: 'episode', season: 1, episode: 2 } as const
 
 function cand(over: Partial<Candidate>): Candidate {
   const value = over.value ?? '/a.png'
@@ -54,7 +54,7 @@ function cand(over: Partial<Candidate>): Candidate {
 function highCastle(over: Partial<Candidates> = {}): Candidates {
   return {
     media_type: 'tv',
-    tmdb_id: 60622,
+    tmdb_id: 62017,
     kind: 'logo',
     season: null,
     episode: null,
@@ -87,7 +87,7 @@ function highCastle(over: Partial<Candidates> = {}): Candidates {
 function override(over: Partial<Override> = {}): Override {
   return {
     media_type: 'tv',
-    tmdb_id: 60622,
+    tmdb_id: 62017,
     kind: 'logo',
     season: null,
     episode: null,
@@ -195,6 +195,20 @@ describe('OverridePicker', () => {
     const changed = w.emitted('changed')![0]![0] as { kind: string; message: string; redrawable: boolean }
     expect(changed.kind).toBe('logo')
     expect(changed.redrawable).toBe(true)
+  })
+
+  it('says when a language-specific override still wins over the saved one', async () => {
+    vi.mocked(putOverride).mockResolvedValue({
+      override: override(),
+      purge: {} as never,
+      shadowed_by: [override({ lang: 'en' })],
+    })
+    const w = await mountPicker(logoTarget)
+    await tiles(w)[1]!.trigger('click')
+    await w.find('[data-testid="save"]').trigger('click')
+    await flushPromises()
+    const changed = w.emitted('changed')![0]![0] as { message: string }
+    expect(changed.message).toMatch(/override for .*en.* still wins for those requests/)
   })
 
   it('sends fanart_id for a fanart candidate, with the badge switch', async () => {

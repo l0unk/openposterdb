@@ -577,3 +577,93 @@ async fn candidates_reject_bad_parameters() {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{bad} → {json}");
     }
 }
+
+// --- fix round: language shadowing, load-failure backoff -------------------
+
+#[tokio::test]
+async fn put_reports_language_rows_that_still_win() {
+    let (app, _state) = common::setup_test_app().await;
+    let token = common::setup_admin(&app).await;
+    let put = |lang: &'static str, path: &'static str| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let q = if lang.is_empty() {
+                String::new()
+            } else {
+                format!("?lang={lang}")
+            };
+            let (status, json) = send(
+                &app,
+                "PUT",
+                &format!("/api/admin/louk/overrides/movie/9100010/logo{q}"),
+                Some(&token),
+                Some(serde_json::json!({"source": "tmdb", "value": path})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{json}");
+            json
+        }
+    };
+    let json = put("en", "/en.png").await;
+    assert_eq!(json["shadowed_by"].as_array().unwrap().len(), 0);
+    // An any-language row is shadowed by the English one for English requests.
+    let json = put("", "/any.png").await;
+    let shadow = json["shadowed_by"].as_array().unwrap();
+    assert_eq!(shadow.len(), 1, "{json}");
+    assert_eq!(shadow[0]["lang"], "en");
+    assert_eq!(shadow[0]["value"], "/en.png");
+    // A base-language row is shadowed only by its regional rows.
+    put("pt-BR", "/pt-br.png").await;
+    let json = put("pt", "/pt.png").await;
+    let shadow = json["shadowed_by"].as_array().unwrap();
+    assert_eq!(shadow.len(), 1, "{json}");
+    assert_eq!(shadow[0]["lang"], "pt-BR");
+    let json = put("pt-BR", "/pt-br2.png").await;
+    assert_eq!(json["shadowed_by"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn store_load_failure_backs_off() {
+    let (_app, state) = common::setup_test_app().await;
+    use sea_orm::ConnectionTrait;
+    state
+        .db
+        .execute_unprepared("ALTER TABLE louk_overrides RENAME TO louk_overrides_away")
+        .await
+        .unwrap();
+    // The first load fails: no override, no error.
+    assert!(
+        store(&state)
+            .lookup(&state.db, "movie", 9_100_011, ImageType::Logo, -1, -1, "en")
+            .await
+            .is_none()
+    );
+    state
+        .db
+        .execute_unprepared("ALTER TABLE louk_overrides_away RENAME TO louk_overrides")
+        .await
+        .unwrap();
+    state
+        .db
+        .execute_unprepared(
+            "INSERT INTO louk_overrides (media_type, tmdb_id, kind, source, value) VALUES ('movie', 9100011, 'logo', 'tmdb', '/x.png')",
+        )
+        .await
+        .unwrap();
+    // Within the retry pause the table is not queried again.
+    assert!(
+        store(&state)
+            .lookup(&state.db, "movie", 9_100_011, ImageType::Logo, -1, -1, "en")
+            .await
+            .is_none()
+    );
+    // An explicit reload (or the next retry after 30 s) sees it.
+    store(&state).reload(&state.db).await.unwrap();
+    assert!(
+        store(&state)
+            .lookup(&state.db, "movie", 9_100_011, ImageType::Logo, -1, -1, "en")
+            .await
+            .is_some()
+    );
+}
