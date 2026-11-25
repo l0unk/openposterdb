@@ -69,8 +69,8 @@ Every place where the fork edits a file upstream also has. These are the places 
 Line numbers are at `v1.3.0-louk.1` and drift; search for `louk-fork:`.
 
 To regenerate the list:
-`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (30 lines
-today).
+`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (63 lines
+after the badge looks).
 
 Conflict risk on a sync: **low** = upstream's own line is untouched (the fork only added a line), so a
 conflict needs upstream to edit the same neighbourhood. **medium** = the hook replaces or wraps upstream
@@ -101,6 +101,7 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/tests/common/mod.rs:135` | `louk` in the test `Config` literal. | low |
 | `api/src/louk/mod.rs:2` | `pub mod badge_looks;` (fork file, listed for completeness). | none |
 | `api/src/services/db.rs:247-295` | `BadgeBackground` gets three variants (`Score`, `Mono`, `Average`), their tokens `s`/`m`/`a`, the `as_str`/`parse` arms and a longer error message. Everything else (query param, settings JSON, DB, cache token `.bg<x>`, CDN hash) follows from `parse`/`as_str`. | medium (upstream adding its own background value would touch the same lines; pick tokens that do not clash) |
+| `api/src/handlers/image.rs:94` | One doc-comment line on `badge_background` naming the fork values (shows in the OpenAPI schema). | low |
 | `api/src/image/badge.rs:38` | `section_colors` match arm for the three variants (the match is exhaustive; unreachable in practice). | low |
 | `api/src/image/badge.rs:218,376` | First line of `render_badges_uniform` and `render_vertical_badge`: fork looks are drawn by `louk::badge_looks`, upstream looks fall through unchanged. | low |
 | `api/src/image/generate.rs:359,443,632,732` | One line after `for_shape` in each `render_*_sync`: `badge_looks::collapse` turns the badge list into one average badge for the `a` look (borrows the list for every other look). | low |
@@ -117,6 +118,7 @@ Also changed, without a marker (documentation, easy to merge):
 | `docs/configuration.md` | A "Fork-only (loukdekker.nl)" section appended at the end. |
 | `docs/api.md` | One paragraph under the backdrop sizes about `BACKDROP_MAX_WIDTH`; one sub-bullet under `badge_background` for the fork looks. |
 | `docs/configuration.md` | A "Badge looks" subsection at the end of the fork section. |
+| `docs/architecture.md` | The fork's `badge_background` values added to the cache-token and parameter tables. |
 
 `Cargo.toml` and `Cargo.lock` are unchanged: the app still reports version `1.3.0`. The git tag
 carries the fork version. That keeps the most conflict-prone files out of the diff.

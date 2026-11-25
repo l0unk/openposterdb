@@ -64,7 +64,7 @@ Cache keys uniquely identify a rendered image. They are used as keys in the in-m
 | Badge direction | `.d{dir}` | `.dh`, `.dv` | `h` = horizontal, `v` = vertical (resolved from `d` = default) |
 | Badge size | `.b{size}` | `.bm`, `.bxl` | `xs` = extra-small, `s` = small, `m` = medium (default), `l` = large, `xl` = extra-large |
 | Badge shape | `.sh{shape}` | `.shr`, `.shp` | `r` = rounded (default), `p` = pill (the `sh` prefix distinguishes it from the `.s{style}` token above) |
-| Badge background | `.bg{bg}` | `.bgd`, `.bgn` | `d` = default, `k` = dark, `t` = transparent, `n` = none |
+| Badge background | `.bg{bg}` | `.bgd`, `.bgn` | `d` = default, `k` = dark, `t` = transparent, `n` = none; fork only: `s` = score colour, `m` = mono, `a` = average (`.bgs`, `.bgm`, `.bga`) |
 | Split (poster) | `.x1` | `.x1` | Poster badges split onto opposite sides; only present when enabled |
 | Poster fit | `.f{fit}` | `.fc`, `.fp`, `.fb` | `c` = cover, `p` = pad, `b` = blur — `native` (default) emits no token |
 | Edge inset (backdrop) | `.eh{n}` / `.ev{n}` | `.eh8`, `.ev3` | Backdrop ratings inset from the edge by `n`% — `eh` horizontal, `ev` vertical; only the position-relevant axis, only when non-zero |
@@ -120,7 +120,7 @@ Settings are stored as short single-character or two-character codes:
 | `badge_direction` | `d`, `h`, `v` | Default (auto-resolved by position), Horizontal, Vertical |
 | `badge_size` | `xs`, `s`, `m`, `l`, `xl` | Extra-small (0.5×), Small (0.75×), Medium (1.0×), Large (1.25×), Extra-large (1.5×) |
 | `badge_shape` | `r`, `p` | Rounded (default), Pill |
-| `badge_background` | `d`, `k`, `t`, `n` | Default (coloured label + dark value), Dark, Transparent, None |
+| `badge_background` | `d`, `k`, `t`, `n` (fork: `s`, `m`, `a`) | Default (coloured label + dark value), Dark, Transparent, None; fork: Score colour, Mono, One score (average) |
 | `position` | `bc`, `tc`, `l`, `r`, `tl`, `tr`, `bl`, `br` | Bottom-center, Top-center, Left, Right, corners |
 
 ### Example cache keys
