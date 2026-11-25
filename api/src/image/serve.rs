@@ -449,6 +449,7 @@ async fn resolve_with_ratings(
     let skip_ratings = crate::louk::config::effective_skip_ratings(&state.config.louk, skip_ratings); // louk-fork:
     let id_resolve_start = Instant::now();
     let mut resolved = id::resolve(id_type, id_value, &state.tmdb, &state.id_cache).await?;
+    crate::louk::titles::note_resolved(state, id_type.as_str(), id_value, &resolved); // louk-fork:
 
     // When an episode ID hits a non-episode endpoint, re-resolve to the
     // parent series so ratings and assets are series-level.
@@ -456,6 +457,7 @@ async fn resolve_with_ratings(
         if let Some(ref ep) = resolved.episode {
             let series_id = id::format_tmdb_id_value(ep.show_tmdb_id, &MediaType::Tv, None);
             resolved = id::resolve(IdType::Tmdb, &series_id, &state.tmdb, &state.id_cache).await?;
+            crate::louk::titles::note_cross_ids(state, id_type.as_str(), &resolved); // louk-fork:
         }
     }
 
@@ -659,6 +661,7 @@ async fn check_caches(
                 )
                 .await;
         }
+        crate::louk::http_cache::note_key(cache_key); // louk-fork: ETag for this memory hit
         return Ok(Some(entry.bytes.clone()));
     }
 
@@ -708,10 +711,12 @@ pub async fn handle_inner(
 
     // Reject path traversal, null bytes, etc. before any network calls
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
 
     // Resolve "default" badge direction and style early, before cache key construction
     settings.poster_badge_direction = settings.poster_badge_direction.resolve(settings.poster_position);
     settings.poster_badge_style = settings.poster_badge_style.resolve(settings.poster_badge_direction);
+    settings.ratings_limit = crate::louk::overrides::apply::badge_limit_hint(state, id_type_str, id_value, cache::ImageType::Poster, &settings.lang, settings.ratings_limit).await; // louk-fork: no-badges override
 
     let use_fanart = settings.image_source.is_fanart();
     let id_key = format!("{id_type_str}/{id_value}");
@@ -728,6 +733,7 @@ pub async fn handle_inner(
         } else {
             read_available_ratings_cached(state, &id_key).await
         };
+        let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
         if let Some(available) = fast_path_available {
             let available_ratings_ms = fast_path_start.elapsed().as_millis() as u64;
             let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, settings.ratings_limit);
@@ -760,6 +766,7 @@ pub async fn handle_inner(
                             "slow poster request (fast path hit)"
                         );
                     }
+                    if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::Poster { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
                     return Ok((bytes, release_date));
                 }
             }
@@ -784,6 +791,8 @@ pub async fn handle_inner(
     let (resolved, ratings_result, cross_ids) =
         resolve_with_ratings(state, id_type, id_value, true, skip_ratings).await?;
     let resolve_ms = resolve_start.elapsed().as_millis() as u64;
+    settings.ratings_limit = crate::louk::overrides::apply::badge_limit(state, &resolved, cache::ImageType::Poster, &settings.lang, settings.ratings_limit).await; // louk-fork: no-badges override
+    let use_fanart = use_fanart && !crate::louk::overrides::apply::has_art(state, &resolved, cache::ImageType::Poster, &settings.lang).await; // louk-fork: an override replaces the fanart branch
 
     // Persist available sources for future fast-path lookups (always write,
     // even with external_cache_only — this is an optimization index, not a
@@ -1150,13 +1159,15 @@ fn trigger_logo_backdrop_refresh(
             upsert_available_ratings_cached(&state2, &id_key, &sources, cross_ids.release_date.as_deref()).await;
         }
         let badges = ratings::apply_rating_preferences(ratings_result.badges, &settings.ratings_order, &settings.ratings_exclude, type_ratings_limit);
+        let badges = crate::louk::overrides::apply::strip_badges(&state2, &resolved, kind, lang, badges).await; // louk-fork: no-badges override
 
         let label = kind.label();
         let not_found = || AppError::IdNotFound(format!("no {label} available"));
 
         // Use the same primary/fallback pattern as the generation path
         let fanart_is_primary = settings.image_source.is_fanart() && fanart.is_some();
-        let image_bytes = if fanart_is_primary {
+        let louk_bytes = crate::louk::overrides::apply::source_bytes(&state2, &resolved, kind, lang, image_size).await; // louk-fork:
+        let image_bytes = if let Some(b) = louk_bytes { b } else if fanart_is_primary { // louk-fork: override art first
             // Fanart primary → TMDB fallback
             let primary = if let Some(fc) = fanart {
                 fetch_fanart_image(fc, &state2.tmdb, &state2.fanart_cache, &resolved, lang, textless, kind, &state2.config.cache_dir, state2.config.external_cache_only).await.map(|r| r.bytes)
@@ -1220,6 +1231,7 @@ async fn generate_episode(
     settings: &RenderSettings,
     image_size: Option<ImageSize>,
 ) -> Result<Vec<u8>, AppError> {
+    if let Some(bytes) = crate::louk::overrides::apply::render_episode(state, resolved, &badges, settings, image_size).await { return Ok(bytes); } // louk-fork: override art first
     let poster_path = resolved
         .poster_path
         .as_deref()
@@ -1315,6 +1327,7 @@ async fn generate_poster_with_source(
     image_size: Option<ImageSize>,
     fanart_already_tried: bool,
 ) -> Result<(Vec<u8>, Option<String>, Option<PosterMatch>, CrossIdInfo), AppError> {
+    if let Some(bytes) = crate::louk::overrides::apply::render_poster(state, resolved, &badges, settings, image_size).await { return Ok((bytes, cross_ids.release_date.clone(), None, cross_ids.clone())); } // louk-fork: override art first
     let default_poster_path = resolved
         .poster_path
         .as_deref()
@@ -1442,7 +1455,7 @@ async fn resolve_tvdb_id(
 }
 
 /// Fetch all fanart images (cached) and return the appropriate list for the given kind.
-async fn fetch_fanart_images(
+pub(crate) async fn fetch_fanart_images( // louk-fork: pub(crate) for the override candidates
     fanart: &FanartClient,
     tmdb: &crate::services::tmdb::TmdbClient,
     cache: &moka::future::Cache<String, Arc<FanartImages>>,
@@ -1693,10 +1706,12 @@ pub async fn handle_episode_inner(
     let id_type = id::IdType::parse(id_type_str)?;
     let id_value = id_value_jpg.strip_suffix(".jpg").unwrap_or(id_value_jpg);
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
 
     // Resolve episode-specific defaults
     settings.episode_badge_direction = settings.episode_badge_direction.resolve(settings.episode_position);
     settings.episode_badge_style = settings.episode_badge_style.resolve(settings.episode_badge_direction);
+    settings.episode_ratings_limit = crate::louk::overrides::apply::badge_limit_hint(state, id_type_str, id_value, cache::ImageType::Episode, "", settings.episode_ratings_limit).await; // louk-fork: no-badges override
 
     let id_key = format!("{id_type_str}/{id_value}");
 
@@ -1708,6 +1723,7 @@ pub async fn handle_episode_inner(
     } else {
         read_available_ratings_cached(state, &id_key).await
     };
+    let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
     if let Some(available) = fast_path_available {
         let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, settings.episode_ratings_limit);
         let suffix = settings_cache_suffix_with_ratings(&settings, cache::ImageType::Episode, image_size, &ratings_suffix);
@@ -1720,6 +1736,7 @@ pub async fn handle_episode_inner(
             trigger_episode_refresh(s, k, p, id_type, id_value, &cache_suffix, &settings, image_size);
         }).await? {
             let release_date = cache::read_meta_db(&state.db, &cache_key).await;
+            if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::Episode { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
             return Ok((bytes, release_date));
         }
     }
@@ -1746,6 +1763,7 @@ pub async fn handle_episode_inner(
         )));
     }
 
+    settings.episode_ratings_limit = crate::louk::overrides::apply::badge_limit(state, &resolved, cache::ImageType::Episode, "", settings.episode_ratings_limit).await; // louk-fork: no-badges override
     // Persist available sources for fast-path lookups.
     if !skip_ratings {
         let sources = ratings::available_sources_string(&ratings_result.badges);
@@ -1808,6 +1826,7 @@ pub async fn handle_logo_backdrop_inner(
     let id_type = IdType::parse(id_type_str)?;
     let id_value = kind.strip_ext(id_value_raw);
     cache::validate_id_value(id_value)?;
+    crate::louk::titles::touch(state, id_type_str, id_value); // louk-fork:
     let kind_prefix = kind.kind_prefix();
     let label = kind.label();
 
@@ -1816,6 +1835,7 @@ pub async fn handle_logo_backdrop_inner(
         LogoBackdropKind::Logo => settings.logo_ratings_limit,
         LogoBackdropKind::Backdrop => settings.backdrop_ratings_limit,
     };
+    let type_ratings_limit = crate::louk::overrides::apply::badge_limit_hint(state, id_type_str, id_value, kind, &settings.lang, type_ratings_limit).await; // louk-fork: no-badges override
     let params = LbRenderParams::from_settings(lb_kind, settings);
     let type_badge_style = params.badge_style;
     let type_label_style = params.label_style;
@@ -1859,6 +1879,7 @@ pub async fn handle_logo_backdrop_inner(
     } else {
         read_available_ratings_cached(state, &id_key).await
     };
+    let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
     if let Some(available) = fast_path_available {
         let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, type_ratings_limit);
         let suffix = settings_cache_suffix_with_ratings(settings, kind, image_size, &ratings_suffix);
@@ -1876,6 +1897,7 @@ pub async fn handle_logo_backdrop_inner(
                 trigger_logo_backdrop_refresh(s, k, p, id_type, &id_value, &lb_cache_suffix, &settings, lb_kind, image_size);
             }).await? {
                 let release_date = cache::read_meta_db(&state.db, &cache_key).await;
+                if louk_swr { crate::louk::swr::revalidate(state, &id_key, &cache_key, crate::louk::swr::Replay::LogoBackdrop { id_type: id_type_str.into(), id_value: id_value_raw.into(), settings: settings.clone(), kind: lb_kind, image_size }); } // louk-fork: SWR
                 return Ok((bytes, release_date));
             }
         }
@@ -1886,6 +1908,7 @@ pub async fn handle_logo_backdrop_inner(
     let skip_ratings = type_ratings_limit == 0;
     let (resolved, ratings_result, cross_ids) =
         resolve_with_ratings(state, id_type, id_value, true, skip_ratings).await?;
+    let type_ratings_limit = crate::louk::overrides::apply::badge_limit(state, &resolved, kind, &settings.lang, type_ratings_limit).await; // louk-fork: no-badges override
 
     // Persist available sources for future fast-path lookups (always write,
     // even with external_cache_only — this is an optimization index, not a
@@ -1981,7 +2004,8 @@ pub async fn handle_logo_backdrop_inner(
             let not_found = || AppError::IdNotFound(format!("no {} available", ctx.label));
 
             // Primary source, then fallback
-            let (primary, fallback) = if fanart_is_primary {
+            let louk_bytes = crate::louk::overrides::apply::source_bytes(&ctx.state, &ctx.resolved, kind, fanart_lang, image_size).await; // louk-fork:
+            let (primary, fallback) = if let Some(b) = louk_bytes { (Some(b), None) } else if fanart_is_primary { // louk-fork: override art first
                 // Fanart preferred — try fanart first (unless skipped), then TMDB fallback
                 let primary = if try_fanart {
                     if let Some(ref fc) = ctx.fanart {

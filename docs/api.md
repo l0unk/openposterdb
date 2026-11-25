@@ -74,6 +74,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?badge_size={xs|s|m|l|xl}`: badge scale — extra-small, small, medium, large, extra-large
 - `?badge_shape={r|p}`: badge corner shape — `r` (rounded, default), `p` (pill, fully rounded ends). Pills always render as a horizontal icon/label-left, value-right lozenge, even on image types whose default style is vertical (logos, backdrops, episodes)
 - `?badge_background={d|k|t|n}`: badge background — `d` (default: source-coloured label + dark value), `k` (dark: uniformly dark), `t` (transparent: semi-transparent so the artwork shows through), `n` (none: no background, label/value drawn directly on the image with a drop shadow)
+  - Fork only (loukdekker.nl, see [louk/badge-styles.md](louk/badge-styles.md)): `s` (score colour: dark plate, white number, a bar along the bottom that fills with the score in teal/amber/red), `m` (mono: lighter dark plate, white source glyphs instead of official logos, no colour), `a` (one score: a single ring with the average of the shown ratings on 0–10; badge direction, style, shape and label style do not apply). Each has its own cache-key token (`.bgs`, `.bgm`, `.bga`). The admin preview endpoints accept them too and, for these values (and for every value when `art` is given), draw sample ratings spread over all three score colours
 - `?image_source={t|f}`: image source — `t` (TMDB, default), `f` (Fanart.tv). Applies to all image types. The non-selected source is used as fallback
 - `?badge_direction={d|h|v}`: badge stacking direction — `d` (default), `h` (horizontal), `v` (vertical). Applies to poster, backdrop, and episode endpoints
 - `?position={bc|tc|l|r|tl|tr|bl|br}`: badge anchor position. Applies to poster, backdrop, and episode endpoints
@@ -129,3 +130,202 @@ Fork (loukdekker.nl): when the server sets `BACKDROP_MAX_WIDTH`, backdrop sizes 
 | `very-large` / `verylarge` | 1920 × 1080 |
 
 `small` is only valid for backdrops and episodes — requesting it for posters or logos returns `400 Bad Request`. `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.
+
+## Title dashboard (fork-only, admin)
+
+Fork (loukdekker.nl) only. These endpoints sit under the admin login like every other `/api/admin/` route (`Authorization: Bearer <admin token>`; without it `401`). Errors are JSON `{"error": "<message>"}`: `400` for a bad parameter, `404` for an unknown title or id.
+
+The fork records every id an image is requested by (`imdb/tt0133093`, `tmdb/movie-603`, `tvdb/…`, episode ids such as `imdb/episode-tt0944947-S1E2`) and the title it belongs to. Names, years and poster paths are fetched from TMDB in the background (TMDB only, one call at a time); cache entries from before the fork are indexed by a slow background backfill. Times are Unix seconds.
+
+| Method | Path | What |
+|---|---|---|
+| `GET` | `/api/admin/louk/titles?q=&type=&sort=&page=&per_page=` | Title list. `q`: part of the name (case-insensitive), or an exact imdb id or tmdb id. `type`: `movie`, `tv` (empty or `all` = both). `sort`: `last` (default, last requested first) or `name`. `page` from 1, `per_page` default 48, max 200. Returns `{items: [title summary], total, page, per_page}`. |
+| `GET` | `/api/admin/louk/titles/{media_type}/{tmdb_id}` | One title (`media_type` = `movie` or `tv`): the summary fields plus `tvdb_id`, `first_seen`, `resolved_at`, `aliases`, `images` and, for shows only, `seasons`. |
+| `GET` | `/api/admin/louk/titles/by-alias/{id_type}/{id_value}` | Which title an id belongs to: `{media_type, tmdb_id}`, or `404`. A full cache value (`tt0133093@ir.zm`) is cut to its id. |
+| `POST` | `/api/admin/louk/titles/{media_type}/{tmdb_id}/purge` | Purges every cached image of the title under every id it is known by (the per-title purge of the admin cache pages, once per id and kind). Returns `{ok, external_cache_only, ids, files_deleted, meta_deleted, ratings_deleted, errors: [string]}`. The index itself is kept. Upstream's purge also drops the stored ratings of each id, so the next request can cost a few MDBList/OMDb lookups. |
+| `POST` | `/api/admin/louk/titles/{media_type}/{tmdb_id}/refetch?kind=` | Same as the admin cache pages' "fetch" (renders with the global settings; served from cache if already there) for the title's most recently requested id. `kind`: `poster`, `logo` or `backdrop`; omitted = all three. `episode` is `400` (fetch stills per episode with `POST /api/admin/episodes/{id_type}/{id_value}/fetch`). Like the existing fetch buttons, it can resolve ratings for a render (a few MDBList/OMDb lookups). Returns `{ok, results: [{kind, id_type, id_value, ok, error}]}`. |
+
+Title summary: `{media_type, tmdb_id, name, year, imdb_id, poster_thumb_url, last_requested, image_counts: {poster, logo, backdrop, episode}}`. `name`, `year`, `imdb_id` and `poster_thumb_url` are `null` until known; `poster_thumb_url` is a TMDB `w185` URL the browser loads directly.
+
+In the detail: `aliases` = `[{id_type, id_value, season, episode, last_requested}]` (`season`/`episode` set for episode ids). `images` = every cached render of the title under any of its ids, newest first: `[{kind, id_type, cache_value, created_at, updated_at, admin_image_url}]`, where `admin_image_url` is the existing admin image endpoint for that row (needs the admin token). `seasons` (shows only) = `[{season, episodes: [{episode, name, air_date, still_thumb_url, cached: [image]}]}]` for the seasons that have a requested episode or whose episode names are already stored; episode names come from TMDB `/tv/{id}/season/{n}` on first view and are kept 7 days. `still_thumb_url` is a TMDB `w300` URL.
+
+`episodes_pending` (shows only, added later; `true`/`false`): a show page fetches stale season episode names from TMDB for at most 3 s and at most 10 seasons, seasons with cached stills first; the rest are fetched in the background and the response says `episodes_pending: true` (those seasons show what is stored, possibly no names yet). Open the page again a few seconds later to get them. The key is absent for movies.
+
+## Per-title overrides (fork-only, admin)
+
+Swap the art of one title for another TMDB or fanart.tv image or an uploaded file, and optionally
+turn its rating badges off. All routes need the admin bearer token (`401` with an empty body without
+it); other errors are `{"error": string}` with `400` (bad parameter), `404`, `413` (upload too
+large) or `500`.
+
+An override is keyed on the **resolved title** (`movie`/`tv` + TMDB id), the image kind (`poster`,
+`logo`, `backdrop`, `episode`), `season`/`episode` for episode stills, and a request language
+(`lang`, posters and logos only; empty = any). Requests by imdb, tmdb or tvdb id all hit the same
+override. A render uses the row for its exact language, then the base language (`pt-BR` → `pt`),
+then the language-less row. The override is applied before the TMDB-vs-fanart preference on every
+path (normal, `ENABLE_CDN_REDIRECTS`, `EXTERNAL_CACHE_ONLY`, posters without a TMDB poster); badges
+are still drawn on top unless `no_badges` is set. If the override's image cannot be fetched or
+decoded, the automatic art is served and a warning is logged. Titles without an override render
+exactly as before (same cache keys and bytes).
+
+Setting, changing or clearing an override purges every cached render of that title and kind: on
+disk, in `image_meta`, and in the in-memory caches, under every id the title is known by (the
+canonical `tmdb/movie-N`/`tmdb/series-N`, the imdb/tvdb ids, every requested id and cross-id copy in
+the title index). CDN copies (`ENABLE_CDN_REDIRECTS`) cannot be purged from here.
+`POST /api/admin/louk/titles/{media_type}/{tmdb_id}/refetch` purges every cached render of a kind
+that has an override (any language) before drawing it again.
+
+### `Override` object
+
+| field | type | notes |
+| --- | --- | --- |
+| `media_type` | `"movie" \| "tv"` | |
+| `tmdb_id` | int | |
+| `kind` | `"poster" \| "logo" \| "backdrop" \| "episode"` | |
+| `season`, `episode` | int \| null | episode stills only |
+| `lang` | string \| null | null = any language |
+| `source` | `"auto" \| "tmdb" \| "fanart" \| "upload"` | `auto` keeps the automatic art (only `no_badges` applies) |
+| `value` | string | TMDB `file_path`, fanart URL, upload sha256, `""` for `auto` |
+| `fanart_id` | string \| null | fanart only |
+| `no_badges` | bool | |
+| `updated_at` | int | Unix seconds |
+| `thumb_url` | string \| null | TMDB `w300` URL, fanart preview URL, or `/api/admin/louk/uploads/{sha256}` (needs the bearer token: fetch as blob); null for `auto` |
+
+`PurgeResult` = `{"ids": string[], "files_deleted": int, "meta_deleted": int, "errors": string[], "external_cache_only": bool}`
+(`ids` are `{id_type}/{id_value}`; `errors` lists ids whose purge failed, the call still succeeds).
+
+### Key parameters
+
+Path `{media_type}/{tmdb_id}/{kind}`; query `season` and `episode` (both required for `episode`, a
+number ≥ 0, `tv` only; forbidden for the other kinds) and `lang` (`en` or `pt-BR` form; posters and
+logos only). Bad values → `400`.
+
+### `GET /api/admin/louk/overrides/{media_type}/{tmdb_id}`
+
+All overrides of a title (kinds in the order poster, logo, backdrop, episode).
+`200 {"overrides": Override[]}`.
+
+### `GET /api/admin/louk/overrides/{media_type}/{tmdb_id}/{kind}?season=&episode=&lang=`
+
+The row stored under exactly this key (no language fallback). `200 {"override": Override | null}`.
+
+### `PUT /api/admin/louk/overrides/{media_type}/{tmdb_id}/{kind}?season=&episode=&lang=`
+
+JSON body `{"source": "tmdb"|"fanart"|"upload"|"auto", "value": string, "fanart_id"?: string, "no_badges"?: bool}`
+(`value` may be omitted for `auto`; `no_badges` defaults to false). Validation: `tmdb` = `/name.ext`
+with `jpg`, `jpeg`, `png` or `webp` (no `.svg`); `fanart` = an `https://assets.fanart.tv/…` URL plus
+`fanart_id` (`http://` fanart URLs are stored as `https://`); `upload` = the sha256 of an existing
+upload. Creates or replaces the row, then purges, and purges once more 60 s later (a render that
+was in flight during the change cannot leave the old art cached). `shadowed_by`: the rows that still
+win over this one for some request languages (for an any-language row every language row of the
+kind, for `pt` its `pt-BR`-style rows); empty when none. The response is
+`{"override": Override, "purge": PurgeResult, "shadowed_by": Override[]}`.
+
+```json
+{"override": {"media_type": "tv", "tmdb_id": 62017, "kind": "logo", "season": null, "episode": null,
+              "lang": null, "source": "tmdb", "value": "/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png", "fanart_id": null,
+              "no_badges": false, "updated_at": 1764060000,
+              "thumb_url": "https://image.tmdb.org/t/p/w300/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png"},
+ "purge": {"ids": ["tmdb/series-62017", "imdb/tt1740299", "tvdb/295829"], "files_deleted": 3,
+           "meta_deleted": 3, "errors": [], "external_cache_only": false},
+ "shadowed_by": []}
+```
+
+### `DELETE /api/admin/louk/overrides/{media_type}/{tmdb_id}/{kind}?season=&episode=&lang=`
+
+Removes the row, purges, and purges once more 60 s later. `200 {"deleted": bool, "purge": PurgeResult | null}` (`purge` is null when
+there was no row).
+
+### `POST /api/admin/louk/uploads`
+
+The request body **is the image file** (raw bytes, not multipart; any `Content-Type`, the format is
+read from the bytes). PNG, JPEG or WebP only, at most 15 MiB, at most 8000 px per side, and it must
+decode (decoder limits as on the poster path: 8192² RGBA). Uploads with a side over 3840 px also
+get a downscaled render copy (`<sha256>.r.<png|jpg>`) that renders decode instead of the original.
+Stored once per content under `DB_DIR/uploads/<sha256>.<png|jpg|webp>` (backed up with
+`./db`).
+
+- `200 {"sha256": string, "format": "png"|"jpeg"|"webp", "width": int, "height": int, "bytes": int, "created": bool, "url": "/api/admin/louk/uploads/<sha256>"}`
+  (`created` false = the same bytes were already stored).
+- `413` over 15 MiB (a larger `Content-Length` is refused before reading; a streamed body is cut at
+  the limit). `400` not PNG/JPEG/WebP (a multipart body gets a hint to send the raw file), a side
+  over 8000 px, or undecodable.
+
+```sh
+curl -H "Authorization: Bearer $TOKEN" --data-binary @logo.png https://posters.example/api/admin/louk/uploads
+```
+
+### `GET /api/admin/louk/uploads/{sha256}`
+
+The stored file with its content type (`Cache-Control: private, max-age=31536000, immutable`).
+`400` unless 64 lowercase hex characters, `404` unknown.
+
+### `GET /api/admin/louk/candidates/{media_type}/{tmdb_id}/{kind}?season=&episode=&lang=`
+
+Every image the title could use: TMDB (all languages; for `episode` the episode's stills) and
+fanart.tv (posters, logos, backdrops). Calls TMDB and fanart.tv only. `lang` (default `en`) is the
+request language the automatic pick and `current` are computed for. The automatic pick is computed
+from the same language-filtered, cached TMDB response and with upstream's own selection functions as
+the render path, so ties (e.g. several 0-vote logos) mark the image actually served.
+
+Order: TMDB first, then fanart; within each, the `lang` language, then language-less art, then
+English, then other languages A–Z; within a language by votes (fanart: likes) descending, and equal
+votes keep the source's own order (first of equals first; upstream's automatic pick takes the last
+of equals). `.svg` logos are left out (they cannot be drawn).
+
+`200`:
+
+| field | type |
+| --- | --- |
+| `media_type`, `tmdb_id`, `kind`, `season`, `episode` | as in `Override` |
+| `lang` | string, the language used |
+| `current` | `Override` \| null, the override a request in `lang` uses now |
+| `auto` | `{"source": "tmdb"\|"fanart", "value": string, "fanart_id": string\|null}` \| null, the automatic pick for a TMDB-preferred key in `lang` |
+| `candidates` | `Candidate[]` |
+| `errors` | string[], non-fatal (`"tmdb: …"`, `"fanart: images unavailable"`) |
+
+`Candidate` = `{"source": "tmdb"|"fanart", "value": string, "fanart_id": string|null, "lang": string|null,
+"votes": number|null, "vote_count": int|null, "likes": int|null, "width": int|null, "height": int|null,
+"thumb_url": string, "full_url": string, "auto": bool, "current": bool}`. `lang` null = no language
+(textless). `votes`/`vote_count` are TMDB's, `likes` fanart's; fanart gives no size. `thumb_url` and
+`full_url` are public image URLs (TMDB `w300`/`original`, fanart preview/full). To apply a
+candidate, `PUT` its `source`, `value` and `fanart_id`.
+
+```json
+{"media_type": "tv", "tmdb_id": 62017, "kind": "logo", "season": null, "episode": null, "lang": "en",
+ "current": null,
+ "auto": {"source": "tmdb", "value": "/ncPjZ213uIOYkIm1DPuBXK3V4Pv.png", "fanart_id": null},
+ "candidates": [
+   {"source": "tmdb", "value": "/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png", "fanart_id": null, "lang": "en",
+    "votes": 3.334, "vote_count": 3, "likes": null, "width": 2505, "height": 1299,
+    "thumb_url": "https://image.tmdb.org/t/p/w300/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png",
+    "full_url": "https://image.tmdb.org/t/p/original/aQJlZEDUAnhSO0DmmoZAG1OGBfM.png",
+    "auto": false, "current": false},
+   {"source": "fanart", "value": "https://assets.fanart.tv/fanart/tv/295829/hdtvlogo/x.png", "fanart_id": "12345",
+    "lang": "en", "votes": null, "vote_count": null, "likes": 4, "width": null, "height": null,
+    "thumb_url": "https://assets.fanart.tv/preview/tv/295829/hdtvlogo/x.png",
+    "full_url": "https://assets.fanart.tv/fanart/tv/295829/hdtvlogo/x.png", "auto": false, "current": false}
+ ],
+ "errors": []}
+```
+## Admin previews on real artwork (fork only, loukdekker.nl)
+
+The admin preview endpoints (`GET /api/admin/preview/{poster|logo|backdrop|episode}`, admin login
+required) draw sample rating badges on a built-in gradient and take the same render parameters as the
+image routes (`badge_background`, `badge_style`, `label_style`, `badge_size`, `badge_shape`, `position`,
+`badge_direction`, `ratings_limit`, `ratings_order`, `ratings_exclude`, `imageSize`, …). The fork adds:
+
+- `?art=movie-<tmdb id>` or `?art=series-<tmdb id>` (`tv-<id>` also works): draw the badges on the
+  title's real TMDB image for that kind, chosen like the image routes do on the TMDB side (English
+  poster/logo, language-free backdrop). No rating service is called: the badges are the preview samples.
+- Episode previews with `art` also need `&season=<n>&episode=<n>` and a series id; they use the
+  episode's still.
+- Without `art` the previews are exactly as before. With it, the preview cache key carries an
+  `.art<m|s><id>` token (episodes `…s<season>e<episode>`). `imageSize` works as usual, e.g.
+  `imageSize=medium` for a 1920 px backdrop.
+- `art` previews take a render slot (like the image routes) and are not kept in the in-memory preview cache, only on disk. It is a dev and gallery tool: don't batch it against production.
+- Without `art`, `season`/`episode` are ignored as before, even if malformed.
+- Errors are JSON `{"error": …}`: 400 for a malformed `art`, 404 when TMDB has no such title or image,
+  502 when TMDB fails, 403 when `art` is used on the self-service `/api/key/me/preview/*` routes.
+
+Example: `/api/admin/preview/backdrop?art=movie-603&badge_background=a&imageSize=medium`.

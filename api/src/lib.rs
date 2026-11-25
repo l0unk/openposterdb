@@ -66,6 +66,7 @@ pub struct AppState {
     /// In-memory cache for `available_ratings` SQLite lookups.
     /// Avoids hitting the database on every image request when the entry is already known.
     pub available_ratings_cache: moka::future::Cache<String, Option<String>>,
+    pub louk: Arc<louk::state::LoukState>, // louk-fork:
 }
 
 impl AppState {

@@ -244,6 +244,10 @@ const BG_DEFAULT: &str = "d";
 const BG_DARK: &str = "k";
 const BG_TRANSPARENT: &str = "t";
 const BG_NONE: &str = "n";
+// louk-fork: badge looks (see api/src/louk/badge_looks.rs, docs/louk/badge-styles.md)
+const BG_LOUK_SCORE: &str = "s";
+const BG_LOUK_MONO: &str = "m";
+const BG_LOUK_AVERAGE: &str = "a";
 
 /// Background treatment behind a rating badge's label and value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,6 +261,12 @@ pub enum BadgeBackground {
     /// No background at all — label/value drawn directly on the image with a
     /// subtle shadow for legibility.
     None,
+    /// louk-fork: dark plate with a score-coloured meter (`louk::badge_looks`).
+    Score,
+    /// louk-fork: quiet monochrome plate, white glyphs (`louk::badge_looks`).
+    Mono,
+    /// louk-fork: one ring with the average of the shown ratings (`louk::badge_looks`).
+    Average,
 }
 
 impl BadgeBackground {
@@ -266,6 +276,9 @@ impl BadgeBackground {
             Self::Dark => BG_DARK,
             Self::Transparent => BG_TRANSPARENT,
             Self::None => BG_NONE,
+            Self::Score => BG_LOUK_SCORE,     // louk-fork:
+            Self::Mono => BG_LOUK_MONO,       // louk-fork:
+            Self::Average => BG_LOUK_AVERAGE, // louk-fork:
         }
     }
 
@@ -275,8 +288,12 @@ impl BadgeBackground {
             BG_DARK => Ok(Self::Dark),
             BG_TRANSPARENT => Ok(Self::Transparent),
             BG_NONE => Ok(Self::None),
+            BG_LOUK_SCORE => Ok(Self::Score),     // louk-fork:
+            BG_LOUK_MONO => Ok(Self::Mono),       // louk-fork:
+            BG_LOUK_AVERAGE => Ok(Self::Average), // louk-fork:
             _ => Err(AppError::BadRequest(
-                format!("badge_background must be '{BG_DEFAULT}', '{BG_DARK}', '{BG_TRANSPARENT}', or '{BG_NONE}'"),
+                // louk-fork: lists the fork looks too
+                format!("badge_background must be '{BG_DEFAULT}', '{BG_DARK}', '{BG_TRANSPARENT}', '{BG_NONE}', '{BG_LOUK_SCORE}', '{BG_LOUK_MONO}', or '{BG_LOUK_AVERAGE}'"),
             )),
         }
     }

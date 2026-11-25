@@ -1,0 +1,90 @@
+From 20fb16b5646c0128dcdece5f3564a6a989df5742 Mon Sep 17 00:00:00 2001
+From: "Claude (dev box)" <claude@loukdekker.nl>
+Date: Wed, 25 Nov 2026 14:08:03 +0000
+Subject: [PATCH 4/4] fix(tmdb): pick the first of equally voted images
+
+select_image_ranked used Iterator::max_by, which returns the LAST of
+equal elements. For titles whose images all have the same vote (often 0,
+e.g. the three English logos of The Man in the High Castle, tv/62017) the
+automatic pick was therefore the last image in TMDB's list, which is
+usually the newest and least reviewed upload. Ties now go to the first
+image in TMDB's order. Higher votes still win as before.
+
+This changes which image is served for tied titles (their cache keys do
+not change, so already cached renders stay until they go stale or are
+purged). It is independent of the override feature and can be dropped.
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+---
+ api/src/services/tmdb.rs | 34 +++++++++++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/api/src/services/tmdb.rs b/api/src/services/tmdb.rs
+index 6a2fb23..3795dcc 100644
+--- a/api/src/services/tmdb.rs
++++ b/api/src/services/tmdb.rs
+@@ -122,7 +122,9 @@ impl TmdbClient {
+         // `max_by` picks a standard-ratio image over any off-ratio one, and the
+         // highest vote among equals. With `target_ratio = None` (logos,
+         // backdrops) the ratio key is always false, so ranking is vote-only —
+-        // identical to the previous behavior.
++        // identical to the previous behavior. `max_by` returns the LAST of
++        // equally ranked images, so it runs over the reversed list: ties go to
++        // the first one in TMDB's order (e.g. several 0-vote logos).
+         let rank = |img: &TmdbImage| -> (bool, f64) {
+             let standard = match target_ratio {
+                 Some(r) => img.aspect_ratio > 0.0 && (img.aspect_ratio - r).abs() <= POSTER_RATIO_TOL,
+@@ -137,6 +139,7 @@ impl TmdbClient {
+             images
+                 .iter()
+                 .filter(|img| img.iso_639_1.as_deref() == target)
++                .rev()
+                 .max_by(cmp)
+         };
+ 
+@@ -156,6 +159,7 @@ impl TmdbClient {
+             let regional = images
+                 .iter()
+                 .filter(|img| img.iso_639_1.as_deref() == Some(base) && img.iso_3166_1.as_deref() == Some(region))
++                .rev()
+                 .max_by(cmp);
+             if let Some(img) = regional {
+                 return Some(img);
+@@ -302,6 +306,34 @@ mod tests {
+         assert!(TmdbClient::select_image(&images, "en", true).is_none());
+     }
+ 
++    #[test]
++    fn select_image_ties_pick_the_first() {
++        // The Man in the High Castle (tv/62017): three English logos, all 0 votes.
++        let images = vec![
++            img("/first.png", Some("en"), 0.0),
++            img("/second.png", Some("en"), 0.0),
++            img("/third.png", Some("en"), 0.0),
++        ];
++        assert_eq!(TmdbClient::select_image(&images, "en", false).unwrap().file_path, "/first.png");
++        assert_eq!(TmdbClient::select_poster(&images, "en", false).unwrap().file_path, "/first.png");
++        // A higher vote still wins wherever it is.
++        let images = vec![
++            img("/a.png", Some("en"), 2.0),
++            img("/b.png", Some("en"), 5.0),
++            img("/c.png", Some("en"), 5.0),
++        ];
++        assert_eq!(TmdbClient::select_image(&images, "en", false).unwrap().file_path, "/b.png");
++        // Same for regional and language-less tiers.
++        let images = vec![
++            img_regional("/br1.jpg", "pt", "BR", 1.0),
++            img_regional("/br2.jpg", "pt", "BR", 1.0),
++            img("/none1.jpg", None, 0.0),
++            img("/none2.jpg", None, 0.0),
++        ];
++        assert_eq!(TmdbClient::select_image(&images, "pt-BR", false).unwrap().file_path, "/br1.jpg");
++        assert_eq!(TmdbClient::select_image(&images, "", false).unwrap().file_path, "/none1.jpg");
++    }
++
+     #[test]
+     fn select_image_picks_highest_vote() {
+         let images = vec![
+-- 
+2.39.5
+

@@ -76,6 +76,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
             Err(e) => panic!("migration failed: {e}\n  SQL: {sql}"),
         }
     }
+    openposterdb_api::louk::schema::apply(&db).await.expect("fork schema failed"); // louk-fork:
 
     let jwt_secret = Zeroizing::new(vec![0xAB; 32]);
     let http = reqwest::Client::new();
@@ -101,6 +102,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
         .build();
     let image_mem_cache = moka::future::Cache::builder()
         .max_capacity(1024 * 1024)
+        .weigher(|k: &String, v: &openposterdb_api::cache::MemCacheEntry| -> u32 { openposterdb_api::louk::http_cache::note_insert(k, v); 1 }) // louk-fork: as main.rs
         .time_to_live(Duration::from_secs(3600))
         // Mirror the production builder so per-title purge tests can exercise
         // `invalidate_entries_if` (see api/src/main.rs).
@@ -189,6 +191,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
             .max_capacity(1000)
             .time_to_live(Duration::from_secs(300))
             .build(),
+        louk: Arc::new(openposterdb_api::louk::state::LoukState::new()), // louk-fork:
     });
 
     let app = build_app(state.clone());

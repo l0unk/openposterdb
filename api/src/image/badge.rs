@@ -35,6 +35,8 @@ fn section_colors(background: BadgeBackground, label_style: LabelStyle, source: 
             with_alpha(DARK_BG, TRANSPARENT_ALPHA),
         )),
         BadgeBackground::None => None,
+        // louk-fork: fork looks are drawn by louk::badge_looks before this is reached
+        BadgeBackground::Score | BadgeBackground::Mono | BadgeBackground::Average => Some((DARK_BG, DARK_BG)),
     }
 }
 
@@ -213,6 +215,7 @@ impl<'a> BadgeFonts<'a> {
 
 /// Render all badges with uniform label and value section widths.
 pub fn render_badges_uniform(badges: &[RatingBadge], font: &FontArc, label_style: LabelStyle, appearance: BadgeAppearance, badge_scale: f32) -> Vec<RgbaImage> {
+    if let Some(images) = crate::louk::badge_looks::render_row(badges, font, label_style, appearance, badge_scale) { return images; } // louk-fork:
     if badges.is_empty() {
         return vec![];
     }
@@ -370,6 +373,7 @@ const BASE_VERT_VALUE_FONT_SIZE: f32 = 34.0;
 /// Render a vertical badge: source label on top, rating value below.
 /// Used for left/right poster positions.
 pub fn render_vertical_badge(badge: &RatingBadge, font: &FontArc, label_style: LabelStyle, appearance: BadgeAppearance, badge_scale: f32) -> RgbaImage {
+    if let Some(image) = crate::louk::badge_looks::render_vertical(badge, font, label_style, appearance, badge_scale) { return image; } // louk-fork:
     let use_icon = label_style.uses_icon();
     let vert_label_font_size = BASE_VERT_LABEL_FONT_SIZE * badge_scale;
     let vert_value_font_size = BASE_VERT_VALUE_FONT_SIZE * badge_scale;

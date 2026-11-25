@@ -1,0 +1,731 @@
+{
+ "base": "preview endpoints, sample ratings on real TMDB art",
+ "looks": [
+  {
+   "value": "d",
+   "name": "Default",
+   "note": "upstream dark plate"
+  },
+  {
+   "value": "s",
+   "name": "Score colour",
+   "note": "white figure on a dark plate, colour meter by score"
+  },
+  {
+   "value": "m",
+   "name": "Mono",
+   "note": "grey glyph icons, no colour at all"
+  },
+  {
+   "value": "a",
+   "name": "One score (average)",
+   "note": "one disc with the mean of the shown sources"
+  }
+ ],
+ "titles": [
+  {
+   "slug": "godfather-2",
+   "name": "The Godfather Part II",
+   "why": "very dark poster",
+   "tmdb": 240,
+   "art": "movie-240",
+   "logo": true,
+   "episode": false,
+   "hero": false
+  },
+  {
+   "slug": "kalki",
+   "name": "Kalki 2898-AD",
+   "why": "busy, high-detail poster; pale sky at the top right of the backdrop",
+   "tmdb": 801688,
+   "art": "movie-801688",
+   "logo": true,
+   "episode": false,
+   "hero": true
+  },
+  {
+   "slug": "chainsaw-man",
+   "name": "Chainsaw Man: Reze Arc",
+   "why": "animated; white top-right area on the backdrop",
+   "tmdb": 1218925,
+   "art": "movie-1218925",
+   "logo": true,
+   "episode": false,
+   "hero": false
+  },
+  {
+   "slug": "modern-family",
+   "name": "Modern Family",
+   "why": "very bright pastel poster; white top-right on the backdrop",
+   "tmdb": 1421,
+   "art": "series-1421",
+   "logo": true,
+   "episode": true,
+   "hero": true
+  },
+  {
+   "slug": "arcane",
+   "name": "Arcane",
+   "why": "animated, busy, saturated",
+   "tmdb": 94605,
+   "art": "series-94605",
+   "logo": true,
+   "episode": true,
+   "hero": false
+  },
+  {
+   "slug": "breaking-bad",
+   "name": "Breaking Bad",
+   "why": "mid-tone, saturated green",
+   "tmdb": 1396,
+   "art": "series-1396",
+   "logo": true,
+   "episode": true,
+   "hero": false
+  }
+ ],
+ "images": {
+  "godfather-2/poster/-/d": {
+   "file": "godfather-2-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=movie-240&badge_background=d",
+   "bytes": 40409,
+   "raw_bytes": 49821
+  },
+  "godfather-2/backdrop/col/d": {
+   "file": "godfather-2-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 49182,
+   "raw_bytes": 237346
+  },
+  "godfather-2/backdrop/row/d": {
+   "file": "godfather-2-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 49125,
+   "raw_bytes": 237438
+  },
+  "godfather-2/logo/-/d": {
+   "file": "godfather-2-logo-d.png",
+   "url": "/api/admin/preview/logo?art=movie-240&badge_background=d",
+   "bytes": 52461,
+   "raw_bytes": 93273
+  },
+  "godfather-2/poster/-/s": {
+   "file": "godfather-2-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=movie-240&badge_background=s",
+   "bytes": 42379,
+   "raw_bytes": 52249
+  },
+  "godfather-2/backdrop/col/s": {
+   "file": "godfather-2-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 50076,
+   "raw_bytes": 239908
+  },
+  "godfather-2/backdrop/row/s": {
+   "file": "godfather-2-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 49871,
+   "raw_bytes": 239236
+  },
+  "godfather-2/logo/-/s": {
+   "file": "godfather-2-logo-s.png",
+   "url": "/api/admin/preview/logo?art=movie-240&badge_background=s",
+   "bytes": 53972,
+   "raw_bytes": 95214
+  },
+  "godfather-2/poster/-/m": {
+   "file": "godfather-2-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=movie-240&badge_background=m",
+   "bytes": 40458,
+   "raw_bytes": 49892
+  },
+  "godfather-2/backdrop/col/m": {
+   "file": "godfather-2-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 48602,
+   "raw_bytes": 235243
+  },
+  "godfather-2/backdrop/row/m": {
+   "file": "godfather-2-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 48551,
+   "raw_bytes": 235242
+  },
+  "godfather-2/logo/-/m": {
+   "file": "godfather-2-logo-m.png",
+   "url": "/api/admin/preview/logo?art=movie-240&badge_background=m",
+   "bytes": 51837,
+   "raw_bytes": 94242
+  },
+  "godfather-2/poster/-/a": {
+   "file": "godfather-2-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=movie-240&badge_background=a",
+   "bytes": 37003,
+   "raw_bytes": 46498
+  },
+  "godfather-2/backdrop/col/a": {
+   "file": "godfather-2-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 52417,
+   "raw_bytes": 230641
+  },
+  "godfather-2/backdrop/row/a": {
+   "file": "godfather-2-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-240&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "godfather-2/logo/-/a": {
+   "file": "godfather-2-logo-a.png",
+   "url": "/api/admin/preview/logo?art=movie-240&badge_background=a",
+   "bytes": 44880,
+   "raw_bytes": 76200
+  },
+  "kalki/poster/-/d": {
+   "file": "kalki-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=movie-801688&badge_background=d",
+   "bytes": 72726,
+   "raw_bytes": 122544
+  },
+  "kalki/backdrop/col/d": {
+   "file": "kalki-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 47307,
+   "raw_bytes": 307875
+  },
+  "kalki/backdrop/row/d": {
+   "file": "kalki-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 47452,
+   "raw_bytes": 308372
+  },
+  "kalki/logo/-/d": {
+   "file": "kalki-logo-d.png",
+   "url": "/api/admin/preview/logo?art=movie-801688&badge_background=d",
+   "bytes": 33307,
+   "raw_bytes": 83619
+  },
+  "kalki/poster/-/s": {
+   "file": "kalki-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=movie-801688&badge_background=s",
+   "bytes": 73340,
+   "raw_bytes": 123185
+  },
+  "kalki/backdrop/col/s": {
+   "file": "kalki-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 47709,
+   "raw_bytes": 309234
+  },
+  "kalki/backdrop/row/s": {
+   "file": "kalki-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 47954,
+   "raw_bytes": 309862
+  },
+  "kalki/logo/-/s": {
+   "file": "kalki-logo-s.png",
+   "url": "/api/admin/preview/logo?art=movie-801688&badge_background=s",
+   "bytes": 34387,
+   "raw_bytes": 85560
+  },
+  "kalki/poster/-/m": {
+   "file": "kalki-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=movie-801688&badge_background=m",
+   "bytes": 72105,
+   "raw_bytes": 121128
+  },
+  "kalki/backdrop/col/m": {
+   "file": "kalki-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 46806,
+   "raw_bytes": 304500
+  },
+  "kalki/backdrop/row/m": {
+   "file": "kalki-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 47031,
+   "raw_bytes": 305080
+  },
+  "kalki/logo/-/m": {
+   "file": "kalki-logo-m.png",
+   "url": "/api/admin/preview/logo?art=movie-801688&badge_background=m",
+   "bytes": 32538,
+   "raw_bytes": 84587
+  },
+  "kalki/poster/-/a": {
+   "file": "kalki-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=movie-801688&badge_background=a",
+   "bytes": 69762,
+   "raw_bytes": 119182
+  },
+  "kalki/backdrop/col/a": {
+   "file": "kalki-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 52593,
+   "raw_bytes": 298381
+  },
+  "kalki/backdrop/row/a": {
+   "file": "kalki-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-801688&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "kalki/logo/-/a": {
+   "file": "kalki-logo-a.png",
+   "url": "/api/admin/preview/logo?art=movie-801688&badge_background=a",
+   "bytes": 25601,
+   "raw_bytes": 66546
+  },
+  "chainsaw-man/poster/-/d": {
+   "file": "chainsaw-man-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=d",
+   "bytes": 68635,
+   "raw_bytes": 108021
+  },
+  "chainsaw-man/backdrop/col/d": {
+   "file": "chainsaw-man-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 46925,
+   "raw_bytes": 158606
+  },
+  "chainsaw-man/backdrop/row/d": {
+   "file": "chainsaw-man-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 47939,
+   "raw_bytes": 159889
+  },
+  "chainsaw-man/logo/-/d": {
+   "file": "chainsaw-man-logo-d.png",
+   "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=d",
+   "bytes": 35755,
+   "raw_bytes": 110492
+  },
+  "chainsaw-man/poster/-/s": {
+   "file": "chainsaw-man-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=s",
+   "bytes": 68220,
+   "raw_bytes": 107592
+  },
+  "chainsaw-man/backdrop/col/s": {
+   "file": "chainsaw-man-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 47656,
+   "raw_bytes": 159935
+  },
+  "chainsaw-man/backdrop/row/s": {
+   "file": "chainsaw-man-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 48881,
+   "raw_bytes": 161277
+  },
+  "chainsaw-man/logo/-/s": {
+   "file": "chainsaw-man-logo-s.png",
+   "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=s",
+   "bytes": 36987,
+   "raw_bytes": 112433
+  },
+  "chainsaw-man/poster/-/m": {
+   "file": "chainsaw-man-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=m",
+   "bytes": 67453,
+   "raw_bytes": 106084
+  },
+  "chainsaw-man/backdrop/col/m": {
+   "file": "chainsaw-man-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 45094,
+   "raw_bytes": 155127
+  },
+  "chainsaw-man/backdrop/row/m": {
+   "file": "chainsaw-man-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 46341,
+   "raw_bytes": 156557
+  },
+  "chainsaw-man/logo/-/m": {
+   "file": "chainsaw-man-logo-m.png",
+   "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=m",
+   "bytes": 35030,
+   "raw_bytes": 111460
+  },
+  "chainsaw-man/poster/-/a": {
+   "file": "chainsaw-man-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=movie-1218925&badge_background=a",
+   "bytes": 67077,
+   "raw_bytes": 106360
+  },
+  "chainsaw-man/backdrop/col/a": {
+   "file": "chainsaw-man-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 41324,
+   "raw_bytes": 149992
+  },
+  "chainsaw-man/backdrop/row/a": {
+   "file": "chainsaw-man-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=movie-1218925&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "chainsaw-man/logo/-/a": {
+   "file": "chainsaw-man-logo-a.png",
+   "url": "/api/admin/preview/logo?art=movie-1218925&badge_background=a",
+   "bytes": 27974,
+   "raw_bytes": 93419
+  },
+  "modern-family/poster/-/d": {
+   "file": "modern-family-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=series-1421&badge_background=d",
+   "bytes": 72741,
+   "raw_bytes": 109141
+  },
+  "modern-family/backdrop/col/d": {
+   "file": "modern-family-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 54346,
+   "raw_bytes": 205645
+  },
+  "modern-family/backdrop/row/d": {
+   "file": "modern-family-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 54473,
+   "raw_bytes": 205107
+  },
+  "modern-family/episode/-/d": {
+   "file": "modern-family-episode-d.jpg",
+   "url": "/api/admin/preview/episode?art=series-1421&season=1&episode=1&badge_background=d",
+   "bytes": 37382,
+   "raw_bytes": 139100
+  },
+  "modern-family/logo/-/d": {
+   "file": "modern-family-logo-d.png",
+   "url": "/api/admin/preview/logo?art=series-1421&badge_background=d",
+   "bytes": 41886,
+   "raw_bytes": 110039
+  },
+  "modern-family/poster/-/s": {
+   "file": "modern-family-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=series-1421&badge_background=s",
+   "bytes": 73016,
+   "raw_bytes": 109837
+  },
+  "modern-family/backdrop/col/s": {
+   "file": "modern-family-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 54963,
+   "raw_bytes": 207815
+  },
+  "modern-family/backdrop/row/s": {
+   "file": "modern-family-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 46830,
+   "raw_bytes": 206968
+  },
+  "modern-family/episode/-/s": {
+   "file": "modern-family-episode-s.jpg",
+   "url": "/api/admin/preview/episode?art=series-1421&season=1&episode=1&badge_background=s",
+   "bytes": 37389,
+   "raw_bytes": 138680
+  },
+  "modern-family/logo/-/s": {
+   "file": "modern-family-logo-s.png",
+   "url": "/api/admin/preview/logo?art=series-1421&badge_background=s",
+   "bytes": 43390,
+   "raw_bytes": 111980
+  },
+  "modern-family/poster/-/m": {
+   "file": "modern-family-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=series-1421&badge_background=m",
+   "bytes": 71763,
+   "raw_bytes": 107559
+  },
+  "modern-family/backdrop/col/m": {
+   "file": "modern-family-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 53374,
+   "raw_bytes": 202503
+  },
+  "modern-family/backdrop/row/m": {
+   "file": "modern-family-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 53575,
+   "raw_bytes": 202020
+  },
+  "modern-family/episode/-/m": {
+   "file": "modern-family-episode-m.jpg",
+   "url": "/api/admin/preview/episode?art=series-1421&season=1&episode=1&badge_background=m",
+   "bytes": 37106,
+   "raw_bytes": 138465
+  },
+  "modern-family/logo/-/m": {
+   "file": "modern-family-logo-m.png",
+   "url": "/api/admin/preview/logo?art=series-1421&badge_background=m",
+   "bytes": 41455,
+   "raw_bytes": 111008
+  },
+  "modern-family/poster/-/a": {
+   "file": "modern-family-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=series-1421&badge_background=a",
+   "bytes": 68861,
+   "raw_bytes": 104022
+  },
+  "modern-family/backdrop/col/a": {
+   "file": "modern-family-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 49892,
+   "raw_bytes": 194850
+  },
+  "modern-family/backdrop/row/a": {
+   "file": "modern-family-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1421&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "modern-family/episode/-/a": {
+   "file": "modern-family-episode-a.jpg",
+   "url": "/api/admin/preview/episode?art=series-1421&season=1&episode=1&badge_background=a",
+   "bytes": 37611,
+   "raw_bytes": 140501
+  },
+  "modern-family/logo/-/a": {
+   "file": "modern-family-logo-a.png",
+   "url": "/api/admin/preview/logo?art=series-1421&badge_background=a",
+   "bytes": 34063,
+   "raw_bytes": 92966
+  },
+  "arcane/poster/-/d": {
+   "file": "arcane-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=series-94605&badge_background=d",
+   "bytes": 62723,
+   "raw_bytes": 96059
+  },
+  "arcane/backdrop/col/d": {
+   "file": "arcane-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 48779,
+   "raw_bytes": 286192
+  },
+  "arcane/backdrop/row/d": {
+   "file": "arcane-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 48601,
+   "raw_bytes": 286015
+  },
+  "arcane/episode/-/d": {
+   "file": "arcane-episode-d.jpg",
+   "url": "/api/admin/preview/episode?art=series-94605&season=1&episode=1&badge_background=d",
+   "bytes": 36590,
+   "raw_bytes": 59118
+  },
+  "arcane/logo/-/d": {
+   "file": "arcane-logo-d.png",
+   "url": "/api/admin/preview/logo?art=series-94605&badge_background=d",
+   "bytes": 58230,
+   "raw_bytes": 187914
+  },
+  "arcane/poster/-/s": {
+   "file": "arcane-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=series-94605&badge_background=s",
+   "bytes": 64134,
+   "raw_bytes": 97831
+  },
+  "arcane/backdrop/col/s": {
+   "file": "arcane-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 49213,
+   "raw_bytes": 288096
+  },
+  "arcane/backdrop/row/s": {
+   "file": "arcane-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 48862,
+   "raw_bytes": 286569
+  },
+  "arcane/episode/-/s": {
+   "file": "arcane-episode-s.jpg",
+   "url": "/api/admin/preview/episode?art=series-94605&season=1&episode=1&badge_background=s",
+   "bytes": 36610,
+   "raw_bytes": 58967
+  },
+  "arcane/logo/-/s": {
+   "file": "arcane-logo-s.png",
+   "url": "/api/admin/preview/logo?art=series-94605&badge_background=s",
+   "bytes": 59549,
+   "raw_bytes": 189855
+  },
+  "arcane/poster/-/m": {
+   "file": "arcane-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=series-94605&badge_background=m",
+   "bytes": 62618,
+   "raw_bytes": 95516
+  },
+  "arcane/backdrop/col/m": {
+   "file": "arcane-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 48294,
+   "raw_bytes": 283412
+  },
+  "arcane/backdrop/row/m": {
+   "file": "arcane-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 54819,
+   "raw_bytes": 282767
+  },
+  "arcane/episode/-/m": {
+   "file": "arcane-episode-m.jpg",
+   "url": "/api/admin/preview/episode?art=series-94605&season=1&episode=1&badge_background=m",
+   "bytes": 35876,
+   "raw_bytes": 58284
+  },
+  "arcane/logo/-/m": {
+   "file": "arcane-logo-m.png",
+   "url": "/api/admin/preview/logo?art=series-94605&badge_background=m",
+   "bytes": 57632,
+   "raw_bytes": 188882
+  },
+  "arcane/poster/-/a": {
+   "file": "arcane-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=series-94605&badge_background=a",
+   "bytes": 59909,
+   "raw_bytes": 92758
+  },
+  "arcane/backdrop/col/a": {
+   "file": "arcane-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 52647,
+   "raw_bytes": 277777
+  },
+  "arcane/backdrop/row/a": {
+   "file": "arcane-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-94605&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "arcane/episode/-/a": {
+   "file": "arcane-episode-a.jpg",
+   "url": "/api/admin/preview/episode?art=series-94605&season=1&episode=1&badge_background=a",
+   "bytes": 37077,
+   "raw_bytes": 60437
+  },
+  "arcane/logo/-/a": {
+   "file": "arcane-logo-a.png",
+   "url": "/api/admin/preview/logo?art=series-94605&badge_background=a",
+   "bytes": 50818,
+   "raw_bytes": 170841
+  },
+  "breaking-bad/poster/-/d": {
+   "file": "breaking-bad-poster-d.jpg",
+   "url": "/api/admin/preview/poster?art=series-1396&badge_background=d",
+   "bytes": 61784,
+   "raw_bytes": 145573
+  },
+  "breaking-bad/backdrop/col/d": {
+   "file": "breaking-bad-backdrop-col-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=d&imageSize=medium&position=tr",
+   "bytes": 77129,
+   "raw_bytes": 442936
+  },
+  "breaking-bad/backdrop/row/d": {
+   "file": "breaking-bad-backdrop-row-d.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=d&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 77507,
+   "raw_bytes": 445002
+  },
+  "breaking-bad/episode/-/d": {
+   "file": "breaking-bad-episode-d.jpg",
+   "url": "/api/admin/preview/episode?art=series-1396&season=1&episode=1&badge_background=d",
+   "bytes": 32907,
+   "raw_bytes": 80771
+  },
+  "breaking-bad/logo/-/d": {
+   "file": "breaking-bad-logo-d.png",
+   "url": "/api/admin/preview/logo?art=series-1396&badge_background=d",
+   "bytes": 52643,
+   "raw_bytes": 163413
+  },
+  "breaking-bad/poster/-/s": {
+   "file": "breaking-bad-poster-s.jpg",
+   "url": "/api/admin/preview/poster?art=series-1396&badge_background=s",
+   "bytes": 62906,
+   "raw_bytes": 147663
+  },
+  "breaking-bad/backdrop/col/s": {
+   "file": "breaking-bad-backdrop-col-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=s&imageSize=medium&position=tr",
+   "bytes": 77170,
+   "raw_bytes": 442873
+  },
+  "breaking-bad/backdrop/row/s": {
+   "file": "breaking-bad-backdrop-row-s.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=s&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 77846,
+   "raw_bytes": 445756
+  },
+  "breaking-bad/episode/-/s": {
+   "file": "breaking-bad-episode-s.jpg",
+   "url": "/api/admin/preview/episode?art=series-1396&season=1&episode=1&badge_background=s",
+   "bytes": 33004,
+   "raw_bytes": 80860
+  },
+  "breaking-bad/logo/-/s": {
+   "file": "breaking-bad-logo-s.png",
+   "url": "/api/admin/preview/logo?art=series-1396&badge_background=s",
+   "bytes": 54153,
+   "raw_bytes": 165355
+  },
+  "breaking-bad/poster/-/m": {
+   "file": "breaking-bad-poster-m.jpg",
+   "url": "/api/admin/preview/poster?art=series-1396&badge_background=m",
+   "bytes": 61893,
+   "raw_bytes": 145230
+  },
+  "breaking-bad/backdrop/col/m": {
+   "file": "breaking-bad-backdrop-col-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=m&imageSize=medium&position=tr",
+   "bytes": 76602,
+   "raw_bytes": 439621
+  },
+  "breaking-bad/backdrop/row/m": {
+   "file": "breaking-bad-backdrop-row-m.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=m&imageSize=medium&position=tr&badge_direction=h",
+   "bytes": 76967,
+   "raw_bytes": 441727
+  },
+  "breaking-bad/episode/-/m": {
+   "file": "breaking-bad-episode-m.jpg",
+   "url": "/api/admin/preview/episode?art=series-1396&season=1&episode=1&badge_background=m",
+   "bytes": 32318,
+   "raw_bytes": 80114
+  },
+  "breaking-bad/logo/-/m": {
+   "file": "breaking-bad-logo-m.png",
+   "url": "/api/admin/preview/logo?art=series-1396&badge_background=m",
+   "bytes": 52251,
+   "raw_bytes": 164382
+  },
+  "breaking-bad/poster/-/a": {
+   "file": "breaking-bad-poster-a.jpg",
+   "url": "/api/admin/preview/poster?art=series-1396&badge_background=a",
+   "bytes": 59983,
+   "raw_bytes": 142243
+  },
+  "breaking-bad/backdrop/col/a": {
+   "file": "breaking-bad-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=a&imageSize=medium&position=tr",
+   "bytes": 74953,
+   "raw_bytes": 433963
+  },
+  "breaking-bad/backdrop/row/a": {
+   "file": "breaking-bad-backdrop-col-a.jpg",
+   "url": "/api/admin/preview/backdrop?art=series-1396&badge_background=a&imageSize=medium&position=tr&badge_direction=h",
+   "shared": true
+  },
+  "breaking-bad/episode/-/a": {
+   "file": "breaking-bad-episode-a.jpg",
+   "url": "/api/admin/preview/episode?art=series-1396&season=1&episode=1&badge_background=a",
+   "bytes": 33165,
+   "raw_bytes": 82272
+  },
+  "breaking-bad/logo/-/a": {
+   "file": "breaking-bad-logo-a.png",
+   "url": "/api/admin/preview/logo?art=series-1396&badge_background=a",
+   "bytes": 44725,
+   "raw_bytes": 146341
+  }
+ }
+}

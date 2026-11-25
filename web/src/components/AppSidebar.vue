@@ -2,7 +2,7 @@
 import { version } from '../../package.json'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { LayoutDashboard, Image, Stamp, Wallpaper, Clapperboard, KeyRound, Settings, LogOut } from 'lucide-vue-next'
+import { LayoutDashboard, Library, Image, Stamp, Wallpaper, Clapperboard, KeyRound, Settings, LogOut } from 'lucide-vue-next'
 import {
   Sidebar,
   SidebarContent,
@@ -24,6 +24,7 @@ const { state, isMobile, setOpenMobile } = useSidebar()
 
 const items = [
   { title: 'Dashboard', icon: LayoutDashboard, to: '/admin' },
+  { title: 'Library', icon: Library, to: '/admin/library' }, // louk-fork:
   { title: 'Posters', icon: Image, to: '/admin/posters' },
   { title: 'Logos', icon: Stamp, to: '/admin/logos' },
   { title: 'Backdrops', icon: Wallpaper, to: '/admin/backdrops' },
@@ -33,7 +34,7 @@ const items = [
 ]
 
 function isActive(path: string) {
-  return route.path === path
+  return route.path === path || (path === '/admin/library' && route.path.startsWith('/admin/library/')) // louk-fork: title pages keep Library highlighted
 }
 
 function onNavigate() {

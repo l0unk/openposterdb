@@ -91,6 +91,7 @@ pub struct ImageQuery {
     #[param(value_type = Option<String>)]
     pub badge_shape: Option<BadgeShape>,
     /// Badge background: `d` (default), `k` (dark), `t` (transparent), `n` (none).
+    /// louk-fork: also `s` (score colour), `m` (mono), `a` (one score, average).
     #[serde(default)]
     #[param(value_type = Option<String>)]
     pub badge_background: Option<BadgeBackground>,

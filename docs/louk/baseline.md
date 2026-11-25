@@ -24,10 +24,21 @@ upstream). Frontend: vitest 328, unchanged. No fork change may leave these worse
 
 ## Release-build memory baseline
 
-**Not measured yet. There are no numbers.** The overnight release build of 2026-11-25 was interrupted
-by a memory stall on the dev box, so no burst was ever run against a real binary. Nothing here is a
-guess to be quoted: when the runs exist, the A-baseline row goes here and in [memory.md](memory.md).
-The exact procedure is in [memory.md](memory.md).
+Measured 2026-11-25 (P1.4) with the released `v1.3.0-louk.1` binary, `BACKDROP_MAX_WIDTH` unset
+(= upstream v1.3.0 rendering), production settings from SPEC §2, ratings disabled (no badges drawn).
+The burst is 490 requests at once (150 titles × poster, large backdrop, logo + 40 episode stills),
+every render cache key cold, the id caches warmed first. Method, all variants and caveats are in
+[memory.md](memory.md).
+
+| run | VmHWM | RSS end of burst | RSS +40 s | RSS idle (+90 s) | p50 / p95 / max | statuses |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | 2449 MB | 2211 MB | 2148 MB | 2148 MB | 8.7 / 18.5 / 19.7 s | 200 × 474, 404 × 8, 500 × 8 |
+| A (repeat) | 2299 MB | 2026 MB | 1971 MB | 1971 MB | 7.5 / 19.0 / 20.1 s | 200 × 474, 404 × 8, 500 × 8 |
+
+Baseline peak: about 2.4 GB (mean 2374 MB), well above production's 1536 MiB limit, and glibc keeps
+about 2 GB after the burst. The 50% goal is therefore ≤ about 1187 MB. With
+`BACKDROP_MAX_WIDTH=1920 MALLOC_ARENA_MAX=2 MALLOC_MMAP_THRESHOLD_=131072` the same burst peaks at
+744–785 MB (31–33%), without a p95 regression.
 
 ## CI
 

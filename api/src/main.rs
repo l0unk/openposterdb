@@ -158,6 +158,7 @@ async fn main() {
             Err(e) => panic!("migration failed: {e}\n  SQL: {sql}"),
         }
     }
+    openposterdb_api::louk::schema::apply(&database).await.expect("fork schema failed"); // louk-fork:
 
     // Run data upgrades (cache key migrations, etc.)
     upgrade::run(&database, &config.cache_dir, config.external_cache_only)
@@ -224,6 +225,7 @@ async fn main() {
 
     let image_mem_cache = moka::future::Cache::builder()
         .weigher(|_key: &String, value: &MemCacheEntry| -> u32 {
+            openposterdb_api::louk::http_cache::note_insert(_key, value); // louk-fork: ETag once per insert
             // Images are typically 50-500KB, well within u32 range
             u32::try_from(value.bytes.len()).unwrap_or(u32::MAX).saturating_add(64)
         })
@@ -337,6 +339,7 @@ async fn main() {
         cross_id_semaphore,
         settings_hash_registry,
         available_ratings_cache,
+        louk: Arc::new(openposterdb_api::louk::state::LoukState::new()), // louk-fork:
         config: config.clone(),
     });
 
@@ -359,6 +362,8 @@ async fn main() {
             }
         });
     }
+
+    openposterdb_api::louk::titles::spawn_workers(state.clone()); // louk-fork:
 
     let app = build_app(state.clone());
 

@@ -15,6 +15,14 @@ pub struct LoukConfig {
     /// render at most this wide (see `louk::backdrop_cap`). `None` (unset or
     /// invalid) keeps upstream's widths.
     pub backdrop_max_width: Option<u32>,
+    /// `LOUK_HTTP_ETAG=false` (or 0/no/off): do not add `ETag`/304 to image
+    /// responses (`louk::http_cache`). Unset = ETags on: the 200 bytes and
+    /// headers are unchanged, only validators are added.
+    pub http_etag_disabled: bool,
+    /// `LOUK_RATINGS_SWR` ("true" | "1"): serve the cached image at once when
+    /// only the ratings index is stale and revalidate in the background
+    /// (`louk::swr`). Off = upstream.
+    pub ratings_swr: bool,
 }
 
 impl LoukConfig {
@@ -22,8 +30,28 @@ impl LoukConfig {
         Self {
             ratings_disabled: parse_safety_bool_env("RATINGS_DISABLED"),
             backdrop_max_width: read_backdrop_max_width(),
+            http_etag_disabled: is_off(env::var("LOUK_HTTP_ETAG").ok().as_deref()),
+            ratings_swr: parse_bool_env("LOUK_RATINGS_SWR"),
         }
+        .logged()
     }
+
+    /// Logs the effective speed flags once at startup, so production's state
+    /// shows in the container log.
+    fn logged(self) -> Self {
+        tracing::info!(
+            http_etag = !self.http_etag_disabled,
+            ratings_swr = self.ratings_swr,
+            "louk: speed settings (LOUK_HTTP_ETAG, LOUK_RATINGS_SWR)"
+        );
+        self
+    }
+}
+
+/// `true` for an explicit "off" value (false/0/no/off, any case); unset or
+/// anything else is not off.
+pub fn is_off(raw: Option<&str>) -> bool {
+    matches!(raw.map(|v| v.trim().to_ascii_lowercase()).as_deref(), Some("false" | "0" | "no" | "off"))
 }
 
 /// `BACKDROP_MAX_WIDTH` via `backdrop_cap::parse_cap`; logs the effective
@@ -82,8 +110,19 @@ mod tests {
     fn louk_config_default_is_upstream() {
         assert_eq!(
             LoukConfig::default(),
-            LoukConfig { ratings_disabled: false, backdrop_max_width: None }
+            LoukConfig { ratings_disabled: false, backdrop_max_width: None, http_etag_disabled: false, ratings_swr: false }
         );
+    }
+
+    #[test]
+    fn is_off_only_for_explicit_off_values() {
+        for v in ["false", "0", "no", "off", " OFF ", "False"] {
+            assert!(is_off(Some(v)), "{v:?}");
+        }
+        for v in ["true", "1", "", "yes", "nope"] {
+            assert!(!is_off(Some(v)), "{v:?}");
+        }
+        assert!(!is_off(None));
     }
 
     #[test]

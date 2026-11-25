@@ -2,7 +2,7 @@
 import { ref, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { Eye, Loader2, Download, Trash2 } from 'lucide-vue-next'
+import { Eye, Loader2, Download, Trash2, LibraryBig } from 'lucide-vue-next' // louk-fork: LibraryBig
 import { titleIdFromCacheValue } from '@/lib/utils'
 import RefreshButton from '@/components/RefreshButton.vue'
 import { Button } from '@/components/ui/button'
@@ -316,6 +316,14 @@ const skeletonClass = computed(() => {
             <TableCell>{{ relativeTime(item.updated_at) }}</TableCell>
             <TableCell>{{ formatDate(item.created_at) }}</TableCell>
             <TableCell class="text-right">
+              <!-- louk-fork: link to the title page -->
+              <router-link
+                :to="`/admin/library/alias/${parseKey(item.cache_key).idType}/${encodeURIComponent(titleIdFromCacheValue(parseKey(item.cache_key).idValue))}`"
+                class="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                aria-label="Open title page"
+                title="Open title page"
+                @click.stop
+              ><LibraryBig class="size-4" /></router-link>
               <Button
                 variant="ghost"
                 size="icon"

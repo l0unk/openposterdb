@@ -32,4 +32,5 @@ pub fn admin_routes() -> Router<Arc<AppState>> {
             "/api/admin/settings",
             get(handlers::admin::get_settings).put(handlers::admin::update_settings),
         )
+        .merge(crate::louk::routes::louk_admin_routes()) // louk-fork:
 }
