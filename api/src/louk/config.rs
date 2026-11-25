@@ -33,6 +33,18 @@ impl LoukConfig {
             http_etag_disabled: is_off(env::var("LOUK_HTTP_ETAG").ok().as_deref()),
             ratings_swr: parse_bool_env("LOUK_RATINGS_SWR"),
         }
+        .logged()
+    }
+
+    /// Logs the effective speed flags once at startup, so production's state
+    /// shows in the container log.
+    fn logged(self) -> Self {
+        tracing::info!(
+            http_etag = !self.http_etag_disabled,
+            ratings_swr = self.ratings_swr,
+            "louk: speed settings (LOUK_HTTP_ETAG, LOUK_RATINGS_SWR)"
+        );
+        self
     }
 }
 

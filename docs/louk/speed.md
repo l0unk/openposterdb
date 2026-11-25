@@ -155,6 +155,8 @@ every request; the per-key+IP limiter (240 burst, then 5/s) sees AIOMetadata as 
 
 ### BUILD 1: ETag and 304 for image responses (`louk::http_cache`)
 
+*Design as proposed in P6.1; names and details differ from what shipped, see "Built" below.*
+
 - **Files:** new `api/src/louk/http_cache.rs` (`pub mod http_cache;` in `louk/mod.rs`); one hook in
   `api/src/routes/app.rs`: `.merge(crate::louk::http_cache::layer(super::image::image_routes(), &state)) // louk-fork:`
   and the same around `cdn_routes()`.
@@ -185,6 +187,8 @@ every request; the per-key+IP limiter (240 burst, then 5/s) sees AIOMetadata as 
   AIOMetadata from the Mac and expect a 304.
 
 ### BUILD 2: stale-while-revalidate for a stale ratings index (`louk::swr`)
+
+*Design as proposed in P6.1; see "Built" below for what shipped.*
 
 - **Files:** new `api/src/louk/swr.rs`; three hooks in `api/src/image/serve.rs`, one per fast path
   (`handle_inner`, `handle_episode_inner`, `handle_logo_backdrop_inner`), each right after
@@ -233,14 +237,17 @@ every request; the per-key+IP limiter (240 burst, then 5/s) sees AIOMetadata as 
 
 ### ETag and 304 (`LOUK_HTTP_ETAG`, on by default)
 
-What changed from the design above: the tag is **not** hashed per response. It is computed once when an
-image enters the memory cache (the cache's weigher calls `louk::http_cache::note_insert`; re-inserting
-the same buffer every 60 s reuses the tag) and kept in a side map of tags only (no image bytes, 50 000
-entries, 2 h). Every served image passes through the memory cache (a hit notes its key in
-`check_caches`, a disk load or a render inserts it), and the layer adds the tag only when the response
-body, the current memory-cache entry and the remembered tag are the same buffer. Anything else (a race,
-an evicted tag) gets no `ETag`, never a wrong one. Cost: one SHA-256 per insert (≈ 0.05–0.3 ms with
-SHA-NI) and one map lookup per response.
+What changed from the design above: the tag is **not** hashed per response. It is computed on every
+insert into the memory cache, so once per cache key (a render and each of its cross-id copies, a disk
+load, a coalesced waiter's insert and the 60 s re-insert of a hot key each hash once): the cache's
+weigher calls `louk::http_cache::note_insert`. Tags are kept in a side map of tags only (no image
+bytes, 10 000 entries, 1 h, the memory cache's TTL). Every served image passes through the memory cache
+(a hit notes its key in `check_caches`, a disk load or a render inserts it), and the layer adds the tag
+only when the response body, the current memory-cache entry and the remembered tag are the same buffer.
+A race or an expired tag means no `ETag`. Pointer identity alone is never trusted: a freed buffer's
+address can come back for new bytes of the same length, which is why every insert re-hashes (the
+review's M1). Cost: one SHA-256 per insert (≈ 0.05–0.3 ms with SHA-NI, inline in the inserting task)
+and one map lookup plus one memory-cache read per response.
 
 - **Strong** tag (`"<32 hex>"`): it names the exact bytes; images are never compressed or transformed
   on the way out, so byte-identical is the right promise. `If-None-Match` uses the weak comparison the

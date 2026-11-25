@@ -8,9 +8,10 @@
 //! The tag is the first 128 bits of the SHA-256 of the image bytes, so it
 //! changes whenever the bytes do (new ratings, an override, a purge and
 //! re-render, another settings suffix or backdrop cap) and is stable across
-//! restarts and memory/disk hits. It is computed **once per insertion into
-//! `image_mem_cache`** (the weigher hook calls [`note_insert`]), not per hit,
-//! and remembered in a small side map of tags (no image bytes):
+//! restarts and memory/disk hits. It is computed on **every insertion into
+//! `image_mem_cache`** (the weigher hook calls [`note_insert`]; once per cache
+//! key, so a render plus its cross-id copies hashes once per key), not per
+//! hit, and remembered in a small side map of tags (no image bytes):
 //!
 //! - every image response of a cache hit, disk load or render passes through
 //!   `image_mem_cache` (a hit notes its key via [`note_key`] in `check_caches`,
@@ -18,10 +19,11 @@
 //!   kept in a task-local set up by the layer;
 //! - the layer serves the tag only when the response body, the current
 //!   `image_mem_cache` entry for that key and the remembered tag all point at
-//!   the same allocation (same pointer and length). Two live buffers cannot
-//!   share an address, so the tag is always the tag of these exact bytes;
-//!   anything else (a race, a path that bypasses the memory cache, an evicted
-//!   tag) just gets no `ETag`, never a wrong one.
+//!   the same allocation (same pointer and length). Every value in the cache
+//!   went through `note_insert` while it was alive, which always re-hashes
+//!   (a freed buffer's address can be reused by new bytes of the same length,
+//!   so pointer identity alone is never trusted as "same content"). A race, a
+//!   path that bypasses the memory cache or an expired tag gets no `ETag`.
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,8 +57,8 @@ fn tags() -> &'static moka::sync::Cache<String, Tag> {
     static TAGS: OnceLock<moka::sync::Cache<String, Tag>> = OnceLock::new();
     TAGS.get_or_init(|| {
         moka::sync::Cache::builder()
-            .max_capacity(50_000)
-            .time_to_live(Duration::from_secs(2 * 3600))
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_secs(3600))
             .build()
     })
 }
@@ -83,22 +85,18 @@ pub fn etag_for(bytes: &[u8]) -> String {
 }
 
 /// Weigher hook (`main.rs`, test harness): called synchronously on every
-/// insert into `image_mem_cache`, in the inserting task. Remembers the tag of
-/// the inserted bytes (hashing only when the buffer is new: the 60 s
-/// re-inserts of the same buffer reuse it) and notes the key for the layer.
+/// insert into `image_mem_cache`, in the inserting task. Always hashes the
+/// inserted bytes (0.05-0.3 ms with SHA-NI): a remembered pointer may belong
+/// to a freed buffer whose address new bytes now reuse. Notes the key for the
+/// layer.
 pub fn note_insert(key: &str, value: &MemCacheEntry) {
     if !ENABLED.load(Ordering::Relaxed) {
         return;
     }
     let ptr = value.bytes.as_ptr() as usize;
     let len = value.bytes.len();
-    let known = tags()
-        .get(key)
-        .is_some_and(|t| t.ptr == ptr && t.len == len);
-    if !known {
-        let etag: Arc<str> = etag_for(&value.bytes).into();
-        tags().insert(key.to_owned(), Tag { etag, ptr, len });
-    }
+    let etag: Arc<str> = etag_for(&value.bytes).into();
+    tags().insert(key.to_owned(), Tag { etag, ptr, len });
     note_key(key);
 }
 
@@ -169,6 +167,7 @@ pub async fn etag_layer(State(state): State<Arc<AppState>>, req: Request, next: 
     let (mut parts, body) = res.into_parts();
     // The image body is one buffered `Bytes`; collecting it is O(1) (no copy).
     let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        tracing::warn!(key = %key, "louk http_cache: could not read an image body");
         return Response::from_parts(parts, Body::empty());
     };
     let Some(etag) = tag_for(&state, &key, &bytes).await else {
@@ -234,30 +233,25 @@ mod tests {
     }
 
     #[test]
-    fn note_insert_reuses_the_tag_of_the_same_buffer() {
+    fn note_insert_always_rehashes() {
         ENABLED.store(true, Ordering::Relaxed);
+        let key = "test/louk-http-cache-unit";
         let bytes = Bytes::from(vec![7u8; 1000]);
+        // A stale tag left for a freed buffer whose address and length the
+        // new bytes happen to reuse.
+        tags().insert(
+            key.to_owned(),
+            Tag {
+                etag: "\"wrong\"".into(),
+                ptr: bytes.as_ptr() as usize,
+                len: bytes.len(),
+            },
+        );
         let entry = MemCacheEntry {
             bytes: bytes.clone(),
             last_checked: std::time::Instant::now(),
         };
-        note_insert("test/louk-http-cache-unit", &entry);
-        let first = tags().get("test/louk-http-cache-unit").unwrap();
-        assert_eq!(&*first.etag, etag_for(&bytes));
-        note_insert("test/louk-http-cache-unit", &entry);
-        let again = tags().get("test/louk-http-cache-unit").unwrap();
-        assert!(
-            Arc::ptr_eq(&first.etag, &again.etag),
-            "same buffer must not be re-hashed"
-        );
-        let other = MemCacheEntry {
-            bytes: Bytes::from(vec![8u8; 1000]),
-            last_checked: std::time::Instant::now(),
-        };
-        note_insert("test/louk-http-cache-unit", &other);
-        assert_eq!(
-            &*tags().get("test/louk-http-cache-unit").unwrap().etag,
-            etag_for(&other.bytes)
-        );
+        note_insert(key, &entry);
+        assert_eq!(&*tags().get(key).unwrap().etag, etag_for(&bytes));
     }
 }

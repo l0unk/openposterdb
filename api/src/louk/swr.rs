@@ -130,11 +130,15 @@ pub enum Replay {
 /// slow path in the background, deduplicated per cache key and bounded.
 pub fn revalidate(state: &AppState, id_key: &str, cache_key: &str, replay: Replay) {
     let swr = &state.louk.swr;
+    let lock_key = format!("louk-swr:{cache_key}");
+    // Cheap early exit before taking a slot: this key is already replaying.
+    if state.refresh_locks.contains_key(&lock_key) {
+        return;
+    }
     let Ok(permit) = swr.permits.clone().try_acquire_owned() else {
         swr.skipped_busy.fetch_add(1, Ordering::Relaxed);
         return;
     };
-    let lock_key = format!("louk-swr:{cache_key}");
     let entry = state.refresh_locks.entry(lock_key.clone()).or_insert(());
     if !entry.is_fresh() {
         return; // one is already running for this key; the permit drops here
