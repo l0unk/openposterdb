@@ -1,7 +1,13 @@
 # Generates harness HTML pages that reuse the REAL compiled CSS bundle (read-only link) and
 # mirror the class strings of the AIOStreams web app components (hero kZ/kq/k$/kG/kJ, item In()).
-import sys
+# Usage: python3 -I build.py <output dir>.  (P5.1 fix round: default badge footprints, art wash.)
+import sys, os, urllib.parse
+OUT=sys.argv[1]
 CSS='file:///home/dev/opdb-fork/scratch/aiostreams-web/static/css/index.a0c1a0d8d1.css'
+
+# Badge footprints at 1920x1080 (render code: BASE_VERT_BADGE_WIDTH 88, vertical badge height
+# 8+48+4+34+8 = 102, BADGE_VERT_SPACING 7, BADGE_SPACING 10, BADGE_TOP_MARGIN 20, BACKDROP_SIDE_MARGIN 20).
+VW, VH, VSP, HSP, M = 88, 102, 7, 10, 20
 
 def svg(white):
     if white:
@@ -15,12 +21,14 @@ def svg(white):
             if i<100:
                 lines.append(f'<text x="{x+8}" y="44" font-size="34" fill="#fff" font-family="sans-serif">{i}%</text>')
                 if i>0: lines.append(f'<text x="8" y="{y-8}" font-size="34" fill="#fff" font-family="sans-serif">{i}%</text>')
-        # simulated badge row: 3 badges ~ 27% x 5.4%, tr, 20px margin (OpenPosterDB default tr)
-        bw=520; bh=58; x=1920-bw-20; y=20
-        body=('<rect width="1920" height="1080" fill="#3a6ea5"/>'+''.join(lines)+
-              f'<rect x="{x}" y="{y}" width="{bw}" height="{bh}" rx="10" fill="#e0245e" fill-opacity=".9"/>')
+        # pink = OpenPosterDB default for `tr`: vertical stack of 5 badges (88 x 102, gap 7, 20 px margins)
+        stack=''.join(f'<rect x="{1920-VW-M}" y="{M+k*(VH+VSP)}" width="{VW}" height="{VH}" rx="10" fill="#e0245e" fill-opacity=".9"/>' for k in range(5))
+        # cyan = `tc` (direction resolves to horizontal): row of 5 vertical badges, centred
+        rw=5*VW+4*HSP; tc=''.join(f'<rect x="{(1920-rw)/2+k*(VW+HSP)}" y="{M}" width="{VW}" height="{VH}" rx="10" fill="#22d3ee" fill-opacity=".9"/>' for k in range(5))
+        # orange dashed = `tr` with badge_direction=h: the same 5 badges as a row at the right edge
+        tr_row=f'<rect x="{1920-rw-M}" y="{M}" width="{rw}" height="{VH}" rx="10" fill="none" stroke="#f59e0b" stroke-width="5" stroke-dasharray="18 10"/>'
+        body=('<rect width="1920" height="1080" fill="#3a6ea5"/>'+''.join(lines)+stack+tc+tr_row)
     s=f'<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">{body}</svg>'
-    import urllib.parse
     return 'data:image/svg+xml,'+urllib.parse.quote(s)
 
 CONTENT_HERO='''<div data-ui="hero-content" class="absolute inset-x-0 bottom-0 space-y-4 px-4 pb-8 max-sm:pb-12 max-sm:text-center lg:start-[var(--side-bar,0px)] lg:max-w-3xl lg:ps-0 lg:pe-10 lg:pb-14">
@@ -56,7 +64,7 @@ def item(img, content=True):
 def corner(img):
     return f'''<div aria-hidden data-ui="hero-corner" class="pointer-events-none fixed end-0 top-0 -z-10 aspect-video max-h-[calc(var(--hero-h)*1.4)] w-[70vw] overflow-hidden [mask-image:linear-gradient(to_right,transparent,rgb(0_0_0/0.4)_20%,black_45%)] rtl:[mask-image:linear-gradient(to_left,transparent,rgb(0_0_0/0.4)_20%,black_45%)] transition-opacity duration-700"><div class="absolute inset-0 [mask-image:linear-gradient(to_bottom,black_45%,rgb(0_0_0/0.4)_75%,transparent)]"><img data-ui="hero-backdrop" src="{img}" class="absolute inset-0 h-full w-full object-cover object-top"></div></div>'''
 
-def page(kind, white, sidebar):
+def page(kind, white, sidebar, wash=False):
     img=svg(white)
     if kind=='hero': inner=hero(img if not white else 'WHITE'+img)
     elif kind=='item': inner=item(img, content=not white)
@@ -64,11 +72,15 @@ def page(kind, white, sidebar):
     if kind=='hero' and white: inner=inner.replace('src="WHITE','src="')
     wrapper_open = '<div class="lg:[&>.appLayout]:ps-20"><div class="appLayout">' if sidebar else '<div><div class="appLayout">'
     style=':root{}' if kind!='corner' else ''
-    hero_h = '' if kind!='corner' else 'style="--hero-h:calc(55dvh)"'
-    return f'''<!doctype html><html lang="en" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="{CSS}"><style>html::-webkit-scrollbar,body::-webkit-scrollbar{{display:none}}html,body{{margin:0;background:#070707;color:#e5e7eb;font-family:sans-serif}}</style></head><body {hero_h}>{wrapper_open}{inner}</div></div></body></html>'''
+    # the app sets --hero-h on the Home wrapper: calc(45dvh) in corner mode (J: k$ caller `n?...45dvh...:...55dvh...`)
+    hero_h = '' if kind!='corner' else 'style="--hero-h:calc(45dvh)"'
+    return f'''<!doctype html><html lang="en" class="dark"{' data-art-wash' if wash else ''}><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="{CSS}"><style>html::-webkit-scrollbar,body::-webkit-scrollbar{{display:none}}html,body{{margin:0;background:#070707;color:#e5e7eb;font-family:sans-serif}}</style></head><body {hero_h}>{wrapper_open}{inner}</div></div></body></html>'''
 
+os.makedirs(OUT,exist_ok=True)
 for kind in ['hero','item','corner']:
     for white in [False,True]:
         for sb in [True,False]:
-            open(f'{kind}-{"white" if white else "grid"}-{"sb" if sb else "nosb"}.html','w').write(page(kind,white,sb))
+            for wash in ([False,True] if kind!='corner' else [False]):
+                name=f'{kind}-{"white" if white else "grid"}-{"sb" if sb else "nosb"}{"-wash" if wash else ""}.html'
+                open(os.path.join(OUT,name),'w').write(page(kind,white,sb,wash))
 print('ok')
