@@ -52,6 +52,26 @@ URLs, `?imageSize=large`, do not change). The two `MALLOC_*` lines are glibc set
 and need no code. Reasons and the stacks-PR text are in
 [configuration.md](../configuration.md#recommended-production-environment).
 
+What happens at deploy:
+
+- Every `?imageSize=large` backdrop gets a **new cache key** with the token `.mw1920`. The first
+  request for each one renders it again (smaller, so cheaper than before).
+- The old 3840 px files (`.zl`) stay on disk and are not used. They sit on the `cache` volume, which is
+  not backed up. They can be purged later in the admin UI, or left alone.
+- `small` and `medium` backdrops, posters, logos and stills keep their keys and keep hitting the
+  disk cache.
+- **Possible MDBList / OMDb cost.** The in-memory ratings cache is empty after the container restart.
+  The first large-backdrop request for each title therefore looks up its ratings once (unless the
+  key's backdrop ratings limit is 0). Upstream would have served those from disk. It is one lookup per
+  title, shared with that title's poster and logo. Deploy at a quiet hour and watch
+  `openposterdb-mdblist-watch` (alert at 80%) on the first day.
+- Startup log line to look for: `BACKDROP_MAX_WIDTH set: large and very-large backdrops render at most
+  1920 px wide`. **It is an INFO line, and `openposterdb/compose.yaml` sets `RUST_LOG=warn`, so it does
+  not show.** To see it, set `RUST_LOG=warn,openposterdb_api=info` for the first start. Without that,
+  the only log sign is a warning when the value is invalid (`BACKDROP_MAX_WIDTH ignored`), so no
+  warning means the value was accepted. You can also open a `large` backdrop and check it is 1920 px
+  wide, or look for `.mw1920` files in the cache.
+
 ### Memory: what is measured and what production sets
 
 Measured on the dev box with the released `v1.3.0-louk.1` binary, under a worst-case catalog burst (490
@@ -84,26 +104,6 @@ Expected: exactly three lines, `BACKDROP_MAX_WIDTH=1920`, `MALLOC_ARENA_MAX=2`,
 `MALLOC_MMAP_THRESHOLD_=131072`. Fewer lines means a variable did not reach the server. After a catalog
 burst, `dstats openposterdb` from the dev box should show well under `1536m`, and idle memory should settle
 around 300 MB (a fresh process starts near 40 MB).
-
-What happens at deploy:
-
-- Every `?imageSize=large` backdrop gets a **new cache key** with the token `.mw1920`. The first
-  request for each one renders it again (smaller, so cheaper than before).
-- The old 3840 px files (`.zl`) stay on disk and are not used. They sit on the `cache` volume, which is
-  not backed up. They can be purged later in the admin UI, or left alone.
-- `small` and `medium` backdrops, posters, logos and stills keep their keys and keep hitting the
-  disk cache.
-- **Possible MDBList / OMDb cost.** The in-memory ratings cache is empty after the container restart.
-  The first large-backdrop request for each title therefore looks up its ratings once (unless the
-  key's backdrop ratings limit is 0). Upstream would have served those from disk. It is one lookup per
-  title, shared with that title's poster and logo. Deploy at a quiet hour and watch
-  `openposterdb-mdblist-watch` (alert at 80%) on the first day.
-- Startup log line to look for: `BACKDROP_MAX_WIDTH set: large and very-large backdrops render at most
-  1920 px wide`. **It is an INFO line, and `openposterdb/compose.yaml` sets `RUST_LOG=warn`, so it does
-  not show.** To see it, set `RUST_LOG=warn,openposterdb_api=info` for the first start. Without that,
-  the only log sign is a warning when the value is invalid (`BACKDROP_MAX_WIDTH ignored`), so no
-  warning means the value was accepted. You can also open a `large` backdrop and check it is 1920 px
-  wide, or look for `.mw1920` files in the cache.
 
 ## Divergence points in upstream files
 
