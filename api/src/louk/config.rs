@@ -11,8 +11,9 @@ pub struct LoukConfig {
     /// Trakt clients and skip every rating lookup (including TMDB votes), so
     /// images render without badges. For dev and test instances only.
     pub ratings_disabled: bool,
-    /// `BACKDROP_MAX_WIDTH`: wired up by the backdrop-cap task; always `None`
-    /// until then.
+    /// `BACKDROP_MAX_WIDTH` (320..=3840): `large` / `very-large` backdrops
+    /// render at most this wide (see `louk::backdrop_cap`). `None` (unset or
+    /// invalid) keeps upstream's widths.
     pub backdrop_max_width: Option<u32>,
 }
 
@@ -20,9 +21,21 @@ impl LoukConfig {
     pub fn from_env() -> Self {
         Self {
             ratings_disabled: parse_bool_env("RATINGS_DISABLED"),
-            backdrop_max_width: None,
+            backdrop_max_width: read_backdrop_max_width(),
         }
     }
+}
+
+/// `BACKDROP_MAX_WIDTH` via `backdrop_cap::parse_cap`; logs the effective
+/// value, and warns (and ignores it) when set but invalid.
+fn read_backdrop_max_width() -> Option<u32> {
+    let raw = env::var("BACKDROP_MAX_WIDTH").ok()?;
+    let cap = crate::louk::backdrop_cap::parse_cap(Some(&raw));
+    match cap {
+        Some(cap) => tracing::info!(backdrop_max_width = cap, "BACKDROP_MAX_WIDTH set: large and very-large backdrops render at most {cap} px wide"),
+        None => tracing::warn!(value = %raw, "BACKDROP_MAX_WIDTH ignored: expected an integer from {} to {}", crate::louk::backdrop_cap::MIN_CAP, crate::louk::backdrop_cap::MAX_CAP),
+    }
+    cap
 }
 
 /// `true` when the variable is exactly "true" or "1" (upstream's convention
@@ -80,5 +93,19 @@ mod tests {
         unsafe { env::set_var("RATINGS_DISABLED", "true") };
         assert!(LoukConfig::from_env().ratings_disabled);
         unsafe { env::remove_var("RATINGS_DISABLED") };
+    }
+
+    #[test]
+    #[serial]
+    fn louk_config_from_env_reads_backdrop_max_width() {
+        unsafe { env::remove_var("BACKDROP_MAX_WIDTH") };
+        assert_eq!(LoukConfig::from_env().backdrop_max_width, None);
+        unsafe { env::set_var("BACKDROP_MAX_WIDTH", "1920") };
+        assert_eq!(LoukConfig::from_env().backdrop_max_width, Some(1920));
+        for bad in ["", "abc", "0", "5000", "-1"] {
+            unsafe { env::set_var("BACKDROP_MAX_WIDTH", bad) };
+            assert_eq!(LoukConfig::from_env().backdrop_max_width, None, "{bad:?}");
+        }
+        unsafe { env::remove_var("BACKDROP_MAX_WIDTH") };
     }
 }

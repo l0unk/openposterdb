@@ -303,8 +303,7 @@ pub async fn preview_backdrop(
     let image_size = parse_preview_image_size(&query.image_size, cache::ImageType::Backdrop)?;
     let badge_size = query.badge_size.unwrap_or(db::default_badge_size());
     let resolved_size = serve::resolve_image_size(image_size);
-    let target_width = resolved_size.backdrop_target_width();
-    let badge_scale = resolved_size.badge_scale(cache::ImageType::Backdrop) * badge_size.scale_factor();
+    let (target_width, badge_scale) = crate::louk::backdrop_cap::render_dims(&state.config.louk, resolved_size, badge_size.scale_factor()); // louk-fork:
 
     let ratings_limit = query.ratings_limit.unwrap_or(PREVIEW_LOGO_BACKDROP_RATINGS_LIMIT);
     db::validate_ratings_limit(ratings_limit)?;
@@ -325,6 +324,7 @@ pub async fn preview_backdrop(
     preview_settings.backdrop_edge_inset_x = edge_inset_x;
     preview_settings.backdrop_edge_inset_y = edge_inset_y;
     let suffix = serve::settings_cache_suffix_with_ratings(&preview_settings, cache::ImageType::Backdrop, image_size, &ratings_suffix);
+    let suffix = crate::louk::backdrop_cap::backdrop_suffix(&state.config.louk, cache::ImageType::Backdrop, image_size, suffix); // louk-fork:
     let cache_key = format!("preview-backdrop:{suffix}");
     let cache_path = cache::preview_path(&state.config.cache_dir, cache::ImageType::Backdrop, &suffix, "jpg")?;
 

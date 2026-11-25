@@ -117,6 +117,8 @@ Heights are representative for a standard ~2:3 source under the default `native`
 | `medium` *(default)* | 1920 × 1080 |
 | `large` | 3840 × 2160 |
 
+Fork (loukdekker.nl): when the server sets `BACKDROP_MAX_WIDTH`, backdrop sizes wider than it (`large`, `very-large`) render at that width instead, keeping the source aspect ratio, with badges scaled to the canvas as for the other sizes (e.g. `BACKDROP_MAX_WIDTH=1920` makes `large` 1920 × 1080). Sizes already at or below the cap are unchanged. See [configuration.md](configuration.md#fork-only-loukdekkernl).
+
 **Episode sizes:**
 
 | Size | Dimensions |

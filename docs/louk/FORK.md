@@ -13,13 +13,17 @@ hooks into upstream files are marked `// louk-fork:`. Baseline numbers: [baselin
 | `api/src/lib.rs` | `pub mod louk;` | Declares the fork module root `api/src/louk/` |
 | `api/src/config.rs` | `Config.louk` field, its `Debug` line, `louk:` initializer plus an early-return block in `from_env`, two env names in the test `clear_config_env` list, fork tests at the end of `mod tests` | One `LoukConfig` field carries all fork config; `RATINGS_DISABLED` drops the OMDb/MDBList/Trakt keys, logs a warning and returns before upstream's "one ratings source" panic |
 | `api/src/image/serve.rs` | first line of `resolve_with_ratings`; first line of `upsert_available_ratings_cached` | `RATINGS_DISABLED` forces `skip_ratings` on every render path, and stops callers (whose own `skip_ratings` is `ratings_limit == 0`) from overwriting the `available_ratings` index with an empty source list |
-| `api/tests/common/mod.rs` | `louk: Default::default()` in the `Config` literal | Test app state with upstream defaults |
+| `api/src/image/serve.rs` | `BACKDROP_MAX_WIDTH`: backdrop arm of the `(target_width, badge_scale)` match in `trigger_logo_backdrop_refresh` and in the `handle_logo_backdrop_inner` generation closure (`backdrop_cap::render_dims`); `let size` in `try_tmdb_logo_backdrop` (`backdrop_cap::tmdb_size`); one added `let suffix = backdrop_cap::backdrop_suffix(..)` line after each `settings_cache_suffix_with_ratings` call in `handle_logo_backdrop_inner` (fast and slow path) | Capped canvas, badge scale and TMDB size; the `.mw<N>` token reaches the cache key, the background-refresh key and the cross-id copies (all built from that suffix) |
+| `api/src/handlers/image.rs` | one added `let hash = backdrop_cap::cdn_hash(..)` line in `try_cdn_redirect` | Capped backdrops get their own `/c/<hash>/` URL |
+| `api/src/handlers/preview.rs` | `preview_backdrop`: `(target_width, badge_scale)` from `backdrop_cap::render_dims`, one added `backdrop_suffix` line for the preview cache key | Admin previews show the capped render and never share a preview cache entry with uncapped ones |
+| `api/tests/common/mod.rs` | `louk` in the `Config` literal; `TestAppOptions.louk` (default `LoukConfig::default()`) threaded through `_setup_test_app` as one extra argument | Test app state with upstream defaults, or a fork config per test |
 
 ## Settings added
 
 | Setting | Where | What |
 | --- | --- | --- |
 | `RATINGS_DISABLED` | env (`api/src/louk/config.rs`) | Dev/test only, never production: no rating clients, no rating lookups, no badges, no startup panic without a rating provider. Guarantees local instances and load tests never call MDBList or OMDb. See [configuration.md](../configuration.md#fork-only-loukdekkernl) |
+| `BACKDROP_MAX_WIDTH` | env (`api/src/louk/config.rs`, logic in `api/src/louk/backdrop_cap.rs`) | Caps the render width of `large`/`very-large` backdrops (production: `1920`); unset = upstream. Capped keys get `.mw<N>` right before the image-size token, so upstream's cache upgrades still parse them. Fanart backdrops are capped at render; their download is unchanged |
 
 ## Syncing upstream
 
