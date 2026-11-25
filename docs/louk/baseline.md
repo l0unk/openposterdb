@@ -17,6 +17,10 @@ Measured 2026-11-25 with the Zig toolchain on the dev box. Later phases must not
 
 ## Release-build memory baseline
 
-Filled in by P1.3 (see docs/louk/memory.md).
+Filled in by P1.4 (see docs/louk/memory.md).
 
 <!-- TODO(P1.4): replace this placeholder with the release-build RSS/peak numbers (settings: SPEC section 2). -->
+
+## CI
+
+Fork CI runs on ubuntu-24.04 because Playwright 1.60 cannot install Chromium on ubuntu-latest (26.04), as of 2026-11-25.
