@@ -149,8 +149,10 @@ fn etag(h: &HeaderMap) -> Option<String> {
 
 /// Logo of `tmdb_id` rendered from an override; returns (uri, etag, body).
 async fn rendered_logo(a: &App, tmdb_id: u64) -> (String, String, Vec<u8>) {
-    seed_movie(&a.state, tmdb_id).await;
+    // Setting an override purges the title's caches (id_cache included), so
+    // the resolution is seeded after it.
     set_logo_override(a, tmdb_id, png(64, 32)).await;
+    seed_movie(&a.state, tmdb_id).await;
     let uri = format!("/{}/tmdb/logo-default/movie-{tmdb_id}.png", a.key);
     let (status, h, body) = get(a, "GET", &uri, None).await;
     assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
@@ -244,6 +246,7 @@ async fn changed_render_gets_a_new_etag() {
     let (uri, old_tag, old_body) = rendered_logo(&a, 9_206_004).await;
     // A new override purges every cached variant; the next request re-renders.
     set_logo_override(&a, 9_206_004, png(64, 32)).await;
+    seed_movie(&a.state, 9_206_004).await;
     let (status, h, body) = get(&a, "GET", &uri, Some(&old_tag)).await;
     assert_eq!(
         status,
@@ -289,8 +292,8 @@ async fn no_headers_change_when_disabled() {
     })
     .await;
     let on = app_with(enabled()).await;
-    seed_movie(&off.state, 9_206_005).await;
     set_logo_override(&off, 9_206_005, png(64, 32)).await;
+    seed_movie(&off.state, 9_206_005).await;
     let uri_off = format!("/{}/tmdb/logo-default/movie-9206005.png", off.key);
     let (_, _, _) = get(&off, "GET", &uri_off, None).await;
     let (status, h_off, b_off) = get(&off, "GET", &uri_off, Some("*")).await;
