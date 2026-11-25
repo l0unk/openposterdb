@@ -26,7 +26,7 @@ harness).
 
 ## What it adds today
 
-Two settings, the title dashboard backend, a load harness and some documentation.
+Two settings, the title dashboard (backend and admin pages), a load harness and some documentation.
 
 | Feature | What it does | How to turn it on | Default |
 | --- | --- | --- | --- |
@@ -44,8 +44,8 @@ every id an image was requested by (imdb, tmdb, tvdb, episode ids) and the title
 name, year and TMDB poster. Admin endpoints under `/api/admin/louk/titles` list titles (search, filter,
 sort), show one title with all its cached images (shows: per season and episode, with TMDB episode
 names), find the title of an id, purge a title under all its ids, and re-fetch it. The contract is in
-[api.md](../api.md#title-dashboard-fork-only-admin). The Library and title pages (branch `louk/p2-2`)
-use it.
+[api.md](../api.md#title-dashboard-fork-only-admin). The Library and title pages in the admin UI use it
+(see "Title dashboard (frontend)" below).
 
 - Code: `api/src/louk/{titles,handlers,routes,schema,state}.rs`; tests `api/tests/louk_titles.rs`.
 - On the image path the fork only notes the id in memory (no database, no network, no waiting). A
@@ -56,6 +56,30 @@ use it.
   days). One call at a time, at least 250 ms apart. Never OMDb, MDBList or Trakt.
 - Always on; it changes no image, cache key or response. Tables: `louk_titles`,
   `louk_title_aliases`, `louk_episodes`.
+- **First run after an upgrade:** the Library starts empty or sparse. Only titles requested after the
+  upgrade are indexed straight away (within about a minute); the backfill indexes about 7,200 older
+  cached ids per day (50 every 10 minutes, starting 5 minutes after boot), so older titles appear over
+  the first day. The Library says so in its empty state and under a short list.
+
+### Title dashboard (frontend)
+
+New admin pages in `web/src/louk/`, built with the existing shadcn-vue components and Tailwind:
+
+- **Library** (`/admin/library`, a sidebar item): a poster wall of every indexed title with search
+  (name, imdb id or tmdb id), a movie/show filter, sort (last requested or name) and paging, all kept
+  in the URL. Each card shows the TMDB poster, name, year, last request and how many posters, logos,
+  backdrops and episode stills are cached.
+- **Title page** (`/admin/library/{movie|tv}/{tmdb id}`): the cached posters, backdrops and logos with
+  view and purge per render, "Re-fetch" per kind and for all, "Purge all" (every id the title was
+  requested by), the list of ids it was requested as, and for shows seasons with their episodes. A
+  show page fetches episode names from TMDB the first time it is opened, which can take a while; the
+  page shows its header and a waiting message meanwhile.
+- **Alias redirect** (`/admin/library/alias/{id_type}/{id_value}`): the new link icon in the rows of the
+  poster, logo, backdrop and episode lists lands here and is sent on to the title page.
+- Re-fetch draws what is not cached yet with the global settings (it does not replace cached images;
+  purge first for that). Purge and re-fetch can cost a few MDBList/OMDb lookups, like the existing
+  buttons; the confirmation dialogs say so. Episode stills are not re-fetched per title.
+- "Override (coming)" buttons are disabled placeholders for the per-title overrides (P3).
 
 ### Production setting
 
@@ -88,8 +112,9 @@ Every place where the fork edits a file upstream also has. These are the places 
 Line numbers are at `v1.3.0-louk.1` and drift; search for `louk-fork:`.
 
 To regenerate the list:
-`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (43 lines
-with the title dashboard backend).
+`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (about 58
+lines with the title dashboard; the web ones inside `web/src/louk/` and its tests are fork-only files
+and not listed in the table).
 
 Conflict risk on a sync: **low** = upstream's own line is untouched (the fork only added a line), so a
 conflict needs upstream to edit the same neighbourhood. **medium** = the hook replaces or wraps upstream
@@ -131,6 +156,11 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/tests/common/mod.rs:136` | `louk` in the test `Config` literal. | low |
 | `api/tests/common/mod.rs:79` | Runs the fork schema after upstream's `MIGRATIONS` loop. | low |
 | `api/tests/common/mod.rs:193` | `louk` in the test `AppState` literal. | low |
+| `web/src/router/index.ts:112-131` | Three child routes of `/admin` (`library`, `library/alias/:idType/:idValue`, `library/:mediaType/:tmdbId`) between a `louk-fork:` and a `louk-fork: end` comment. Pure insertion. | low |
+| `web/src/components/AppSidebar.vue:27` | The "Library" item of the sidebar list; the `lucide-vue-next` import on line 5 also gets `Library` (no marker). | low |
+| `web/src/components/AppSidebar.vue:37` | `isActive` keeps "Library" highlighted on title pages. Rewrites upstream's `return route.path === path`. | medium |
+| `web/src/components/ImageListView.vue:5` | The `lucide-vue-next` import gets `LibraryBig`. Rewrites upstream's line. | medium |
+| `web/src/components/ImageListView.vue:319` | A link icon in each row to `/admin/library/alias/...` (opens the title page). Pure insertion in the actions cell. | low |
 | `.github/workflows/test.yml:7` | Runs on pushes to every branch, no `paths:` filter (upstream: `main` only, and only when `api/`, `web/` or the workflow change). | medium |
 | `.github/workflows/test.yml:20,37,58` | Three jobs pinned to `ubuntu-24.04`. `ubuntu-latest` is now 26.04 and Playwright 1.60 cannot install Chromium there. | medium. If upstream fixes this (new Playwright), take upstream's version and drop the pin. |
 | `.github/workflows/release.yml:6,10` | The whole file is rewritten: one amd64 job, ghcr only, no Docker Hub, no arm64, no manifest-merge job, runner pinned. | **high** (keep ours on every sync) |
@@ -158,6 +188,8 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/titles.rs` | Title index: hooks, flush, details/backfill workers, queries shared with P3 (`aliases_for_title`). |
 | `api/src/louk/handlers.rs`, `routes.rs` | Title dashboard admin endpoints. |
 | `api/tests/louk_titles.rs` | Tests for the index, the endpoints and the rollback check (`upstream_schema_opens_fork_db`). |
+| `web/src/louk/**` | Title dashboard frontend: `api.ts` (typed fetchers for the endpoints), `format.ts`, views (`LibraryView`, `TitleView`, `AliasRedirect`) and components (`TitleCard`, `ImageTile`, `SeasonList`, `SegmentedControl`). |
+| `web/src/__tests__/louk/**` | Unit tests of the above (api, Library, title page, the ImageListView link). |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 
@@ -248,7 +280,7 @@ Why it is safe:
 | Part | Where it stands | Next step |
 | --- | --- | --- |
 | **Memory measurements and allocator (P1.4 to P1.7)** | **No numbers exist.** The release build that was meant to measure them was interrupted on 2026-11-25 by a memory stall on the dev box (a cargo release build and a frontend build ran together under a small memory limit; the box thrashed for 5 hours). The load harness is ready in `scripts/louk/` (its self-test passes against a stub; it has never run against a real binary). The `BACKDROP_MAX_WIDTH` change is in, but its effect on peak memory is **not measured**. No allocator (mimalloc/jemalloc) is built in, `MALLOC_ARENA_MAX` is untested, and the in-flight render cache is not bounded. | One release build with `-j1`, then the runs A to D. Exact procedure in [memory.md](memory.md). A local branch `louk/p1-4` in the dev-box clone has the source at that point; it has the same content as `main`, so nothing is lost. |
-| **Title dashboard (P2)** | The frontend (library and title pages) is on branch `louk/p2-2`. The backend (title index, admin endpoints, rollback test) is on branch `louk/p2-1`. Not merged, not in any release. | Merge both after a local smoke run against a real instance (check the library fills, names arrive, a show page lists seasons). |
+| **Title dashboard (P2)** | Backend and frontend are merged on the branch `louk/p2` (CI green). Not on `main`, not in any release. The Library is sparse right after an upgrade (about 7,200 old ids are indexed per day). A show page needs 10 to 40 s the first time, while the server fetches episode names from TMDB. | Smoke run against a real instance (the library fills, names arrive, a show page lists seasons), then merge. |
 | **Per-title overrides and uploads, and the upstream PR (P3)** | Not started. The design is written down (key = resolved title + image kind, value = TMDB path, Fanart image or upload; admin only). The wrong-logo case (The Man in the High Castle: three logos with 0 votes, upstream picks the last of equal ones) is not fixed. | Build after the dashboard, then prepare the branch `pr/per-title-overrides` from upstream `main` for Louk to open on GitHub. |
 | **New badge styles (P4)** | Not started. | Design 3 to 5 styles, each an option next to the existing `badge_style`, default unchanged. |
 | **Speed and precache (P6)** | Not started; no latency measurements yet. Ideas on the list: prerender siblings, stale-while-revalidate, keep a hot set warm, `Cache-Control` and `ETag`, cheap disk hits. | Measure cold and warm latency first, then pick. Needs the memory work done first. |
