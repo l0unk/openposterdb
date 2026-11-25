@@ -66,3 +66,7 @@ python3 -I $S/results-table.py               # compare all runs in ~/opdb-dev/re
   10 of those shows, S1E1-E4, by series imdb id). Regenerate with `fetch-titles.py` (TMDB only):
   `( set -a; . ~/.config/opdb-dev.env; set +a; unset OMDB_API_KEY MDBLIST_API_KEY; python3 -I scripts/louk/fetch-titles.py )`.
 - `selftest.sh`: offline check of all of the above against a throwaway stub server.
+- `speed-probe.py <label> <titles.json> <out.jsonl> [--fast]`: sequential latency probe (P6), 20 titles ×
+  poster/backdrop large/logo + 20 episodes, one JSON line per request (status, TTFB, total, size, cache
+  headers). `--fast` adds `ratings_limit=0` (same key with ratings disabled) to take production's
+  fast path on a hit. Reads `$OPDB_DEV_HOME/api-key`; results in `docs/louk/speed.md`.
