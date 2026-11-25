@@ -69,7 +69,7 @@ Every place where the fork edits a file upstream also has. These are the places 
 Line numbers are at `v1.3.0-louk.1` and drift; search for `louk-fork:`.
 
 To regenerate the list:
-`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (75 lines
+`grep -rn "louk-fork:" api web .github scripts docs --include='*' | grep -v '^docs/louk/'` (87 lines
 after the badge looks and preview art).
 
 Conflict risk on a sync: **low** = upstream's own line is untouched (the fork only added a line), so a
