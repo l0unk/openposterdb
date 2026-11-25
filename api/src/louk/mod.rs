@@ -2,10 +2,12 @@
 //! small hooks tagged with a `louk-fork` comment (see docs/louk/FORK.md).
 
 pub mod backdrop_cap;
+pub mod badge_looks;
 pub mod config;
 pub mod handlers;
 pub mod http_cache;
 pub mod overrides;
+pub mod preview_art;
 pub mod routes;
 pub mod schema;
 pub mod state;

@@ -74,6 +74,7 @@ Management endpoints (auth, keys, settings) are under `/api/` and return JSON.
 - `?badge_size={xs|s|m|l|xl}`: badge scale — extra-small, small, medium, large, extra-large
 - `?badge_shape={r|p}`: badge corner shape — `r` (rounded, default), `p` (pill, fully rounded ends). Pills always render as a horizontal icon/label-left, value-right lozenge, even on image types whose default style is vertical (logos, backdrops, episodes)
 - `?badge_background={d|k|t|n}`: badge background — `d` (default: source-coloured label + dark value), `k` (dark: uniformly dark), `t` (transparent: semi-transparent so the artwork shows through), `n` (none: no background, label/value drawn directly on the image with a drop shadow)
+  - Fork only (loukdekker.nl, see [louk/badge-styles.md](louk/badge-styles.md)): `s` (score colour: dark plate, white number, a bar along the bottom that fills with the score in teal/amber/red), `m` (mono: lighter dark plate, white source glyphs instead of official logos, no colour), `a` (one score: a single ring with the average of the shown ratings on 0–10; badge direction, style, shape and label style do not apply). Each has its own cache-key token (`.bgs`, `.bgm`, `.bga`). The admin preview endpoints accept them too and, for these values (and for every value when `art` is given), draw sample ratings spread over all three score colours
 - `?image_source={t|f}`: image source — `t` (TMDB, default), `f` (Fanart.tv). Applies to all image types. The non-selected source is used as fallback
 - `?badge_direction={d|h|v}`: badge stacking direction — `d` (default), `h` (horizontal), `v` (vertical). Applies to poster, backdrop, and episode endpoints
 - `?position={bc|tc|l|r|tl|tr|bl|br}`: badge anchor position. Applies to poster, backdrop, and episode endpoints
@@ -307,3 +308,24 @@ candidate, `PUT` its `source`, `value` and `fanart_id`.
  ],
  "errors": []}
 ```
+## Admin previews on real artwork (fork only, loukdekker.nl)
+
+The admin preview endpoints (`GET /api/admin/preview/{poster|logo|backdrop|episode}`, admin login
+required) draw sample rating badges on a built-in gradient and take the same render parameters as the
+image routes (`badge_background`, `badge_style`, `label_style`, `badge_size`, `badge_shape`, `position`,
+`badge_direction`, `ratings_limit`, `ratings_order`, `ratings_exclude`, `imageSize`, …). The fork adds:
+
+- `?art=movie-<tmdb id>` or `?art=series-<tmdb id>` (`tv-<id>` also works): draw the badges on the
+  title's real TMDB image for that kind, chosen like the image routes do on the TMDB side (English
+  poster/logo, language-free backdrop). No rating service is called: the badges are the preview samples.
+- Episode previews with `art` also need `&season=<n>&episode=<n>` and a series id; they use the
+  episode's still.
+- Without `art` the previews are exactly as before. With it, the preview cache key carries an
+  `.art<m|s><id>` token (episodes `…s<season>e<episode>`). `imageSize` works as usual, e.g.
+  `imageSize=medium` for a 1920 px backdrop.
+- `art` previews take a render slot (like the image routes) and are not kept in the in-memory preview cache, only on disk. It is a dev and gallery tool: don't batch it against production.
+- Without `art`, `season`/`episode` are ignored as before, even if malformed.
+- Errors are JSON `{"error": …}`: 400 for a malformed `art`, 404 when TMDB has no such title or image,
+  502 when TMDB fails, 403 when `art` is used on the self-service `/api/key/me/preview/*` routes.
+
+Example: `/api/admin/preview/backdrop?art=movie-603&badge_background=a&imageSize=medium`.

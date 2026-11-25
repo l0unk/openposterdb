@@ -76,3 +76,12 @@ For the loukdekker.nl production container (measured, see [docs/louk/memory.md](
 | `MALLOC_MMAP_THRESHOLD_` | `131072` | glibc setting, not an app setting: fixes the threshold so every buffer of 128 KiB or more is its own mapping and goes back to the OS when freed (by default glibc raises it up to 32 MiB and then never returns these buffers). |
 
 The two `MALLOC_*` variables also help the unmodified upstream image: with them alone, without the width cap, the same burst peaks at about 0.9 GB instead of about 2.4 GB. Set all three in the container's `environment`, and check afterwards that they reached the process (see [FORK.md](louk/FORK.md#memory-what-is-measured-and-what-production-sets)).
+
+### Badge looks (per API key or global, no environment variable)
+
+The fork adds three values to the existing **Badge background** setting (`*_badge_background`, per
+image kind) in Admin → Settings (global) and Admin → API keys → a key's settings: `s` **Score colour**,
+`m` **Mono** and `a` **One score (average)**. They are stored like upstream's values, can also be
+requested per image with `?badge_background=`, and change nothing unless chosen; the default stays `d`.
+After a rollback to upstream, a stored fork value is read as the default (`d`) with a warning in the log.
+Design notes and contrast figures: [louk/badge-styles.md](louk/badge-styles.md).
