@@ -19,6 +19,7 @@ pub struct TestAppOptions {
     pub cache_dir_override: Option<String>,
     pub free_key_enabled: Option<bool>,
     pub disable_fanart: bool,
+    pub louk: openposterdb_api::louk::config::LoukConfig, // louk-fork:
 }
 
 impl Default for TestAppOptions {
@@ -31,6 +32,7 @@ impl Default for TestAppOptions {
             cache_dir_override: None,
             free_key_enabled: None,
             disable_fanart: false,
+            louk: Default::default(), // louk-fork:
         }
     }
 }
@@ -43,14 +45,14 @@ pub async fn setup_test_app_with_options(opts: TestAppOptions) -> (axum::Router,
     let cache_dir_override = opts.cache_dir_override;
     let free_key_enabled = opts.free_key_enabled;
     let disable_fanart = opts.disable_fanart;
-    _setup_test_app(cors_origin, secure_cookies, enable_cdn_redirects, external_cache_only, cache_dir_override, free_key_enabled, disable_fanart).await
+    _setup_test_app(cors_origin, secure_cookies, enable_cdn_redirects, external_cache_only, cache_dir_override, free_key_enabled, disable_fanart, opts.louk).await // louk-fork: louk
 }
 
 pub async fn setup_test_app_with_cors(cors_origin: Option<String>) -> (axum::Router, Arc<AppState>) {
-    _setup_test_app(cors_origin, false, false, false, None, None, false).await
+    _setup_test_app(cors_origin, false, false, false, None, None, false, Default::default()).await // louk-fork: louk
 }
 
-async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enable_cdn_redirects: bool, external_cache_only: bool, cache_dir_override: Option<String>, free_key_enabled: Option<bool>, disable_fanart: bool) -> (axum::Router, Arc<AppState>) {
+async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enable_cdn_redirects: bool, external_cache_only: bool, cache_dir_override: Option<String>, free_key_enabled: Option<bool>, disable_fanart: bool, louk: openposterdb_api::louk::config::LoukConfig) -> (axum::Router, Arc<AppState>) { // louk-fork: louk
     let sqlite_opts = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(":memory:")
         .create_if_missing(true)
@@ -130,7 +132,7 @@ async fn _setup_test_app(cors_origin: Option<String>, secure_cookies: bool, enab
             external_cache_only,
             free_key_enabled,
             disable_public_pages: false,
-            louk: Default::default(), // louk-fork:
+            louk, // louk-fork:
         },
         tmdb: TmdbClient::new("test".into(), http.clone()),
         omdb: None,
