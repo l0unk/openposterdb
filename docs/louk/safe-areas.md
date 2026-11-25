@@ -535,5 +535,5 @@ phone with room to spare (up to five or six). Leave Max ratings at 5 or less. If
 on a phone; Top Center always shows, but looks about half as bright on the TV's big home banner. So the
 tool is a **setting per key**: one key for the TV and desktop devices (Top Right, Max ratings 3 or Badge
 direction Horizontal) and one key for phones (Top Center), if he ever wants both to look right. Nothing
-needs building for this; the settings exist today. Two things are still unchecked on real devices: how the
+needs building for this; the settings exist today. A few things are still unchecked on real devices: how the
 TV's edges, trailers and the phone's status bar interact with the badges (see "Needs a real-device check").
