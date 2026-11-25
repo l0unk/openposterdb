@@ -3,6 +3,34 @@
 Measured 2026-11-25 (P1.4) on the dev box against the released `v1.3.0-louk.1` binary
 (`ghcr.io/l0unk/openposterdb:v1.3.0-louk.1`, run from the extracted image, no rebuild).
 
+## Decisions
+
+Decided 2026-11-25 from the measurements below. These are settled; the sections after this one are the
+evidence.
+
+1. **Production sets three environment variables:** `BACKDROP_MAX_WIDTH=1920`, `MALLOC_ARENA_MAX=2` and
+   `MALLOC_MMAP_THRESHOLD_=131072`. Under the worst-case catalog burst the peak memory (VmHWM) falls from
+   2299–2449 MB (upstream behaviour) to **744–785 MB, 31–33%**, so the goal (at most 50%, no latency
+   regression) is met. p95 latency falls too: about 11 s against about 19 s. The container limit stays
+   `mem_limit: 1536m`: the peak is above 600 MB, and a cold production process can peak higher than this
+   method (run A1: 2988 MB when id lookups were slow). The two `MALLOC_*` variables are settings of the C
+   library (glibc), not of the app. They also help the unmodified upstream image: about 2.4 GB falls to
+   about 0.9 GB (917 MB) without the width cap.
+2. **No built-in memory allocator (P1.5 not built).** jemalloc and mimalloc, tested by `LD_PRELOAD`, both
+   did worse than tuned glibc on peak and on idle memory: jemalloc 1016 MB peak and 437 MB idle, mimalloc
+   1331 MB and 427 MB, against 744–785 MB and 286–290 MB for glibc with the two settings.
+3. **No byte weight on `image_inflight` (P1.6 not built).** At 1920 px the burst's outputs total 102 MB
+   and the cache shares them with the 128 MB image cache, so the gain is about 0.
+4. **Not built now: bounding how many requests hold a downloaded source while they wait for a render
+   permit.** Measured: −80 to −140 MB of peak (10–15%). The goal is already met and the change would touch
+   the order of fetching and rendering in upstream's `generate.rs`. It is the next lever if production
+   still gets killed (see "What is still worth doing").
+
+The three lines and how to check that they reached the container are in
+[FORK.md](FORK.md#memory-what-is-measured-and-what-production-sets) and
+[configuration.md](../configuration.md#recommended-production-environment). To repeat the
+measurements, see "How to repeat this" at the end.
+
 ## Summary
 
 - **Upstream behaviour peaks at about 2.4 GB under a catalog burst** (A: VmHWM 2449 and 2299 MB) and
@@ -24,16 +52,9 @@ Measured 2026-11-25 (P1.4) on the dev box against the released `v1.3.0-louk.1` b
 - Allocators through `LD_PRELOAD` (a stand-in for a built-in global allocator): jemalloc 1016 MB peak,
   437 MB idle; mimalloc 2.0.9 1331 MB peak, 427 MB idle. **Both lose to tuned glibc on peak and on idle.**
 
-Recommended production env (stacks PR):
-
-```
-BACKDROP_MAX_WIDTH=1920
-MALLOC_ARENA_MAX=2
-MALLOC_MMAP_THRESHOLD_=131072
-```
-
-Keep `mem_limit: 1536m`: the measured peak (about 790 MB) is above the 600 MB line, and the
-burst below is not the worst case production can see (see Caveats).
+The production environment that follows from this is under "Decisions" above. `mem_limit: 1536m` stays:
+the measured peak (about 790 MB) is above the 600 MB line, and the burst below is not the worst case
+production can see (see Caveats).
 
 ## Method
 
@@ -56,7 +77,9 @@ burst below is not the worst case production can see (see Caveats).
   slice > 6000 MB. Neither happened: PSI stayed at 0.00, and the slice peaked at 4.8 GB in total.
 - Scripts and every raw result (JSON, md, run logs, side samples) are in the fork job's
   `reports/P1.4-results/` on the dev box (`scripts/` there has the runner, the prime pass, the sampler
-  and the analysis script).
+  and the analysis script). The runner and the prime pass are now in the repo as `scripts/louk/run-variant.sh`
+  and `burst.py --warmup` (see "How to repeat this"); the 1 s side sampler and the post-run sanity fetch
+  are not, so the anonymous-memory, thread and PSI columns below came from the off-repo script only.
 
 ### Harness problem found on first contact, and the workaround
 
@@ -65,7 +88,7 @@ The first A run (`A0`, kept as INVALID) had 135 × 500: **TMDB's own API returne
 (`id_cache`, 1 h) and the TMDB image lists (`tmdb_images_cache`, 30 min) live in in-memory moka caches.
 So a fresh process sends every one of the 490 lookups to the TMDB API at once.
 
-Workaround (`prime.py`): after start, the same titles are requested once at client concurrency 4 with
+Workaround (`prime.py` then; now `burst.py --warmup`, run by `run-variant.sh`): after start, the same titles are requested once at client concurrency 4 with
 **different render cache keys**: backdrops and episodes `?imageSize=small` (w780 source, not the
 burst's `original`), posters `?badge_style=v` (default is `h`) and logos `?badge_style=h` (default is `v`).
 With ratings disabled no badge is drawn, so this is the same work under another key. It warms the id and
@@ -223,7 +246,7 @@ C3 settings, of which up to about 65 MB is prime renders in `image_mem_cache`.
 - **Env through the image's entrypoint:** these runs bypass `entrypoint.sh`. `su` without `-l` keeps
   `MALLOC_*` variables, and glibc only strips them for privilege-gaining (setuid) execs; root running
   `su` gains nothing. Production should still verify once after the deploy:
-  `docker exec openposterdb sh -c 'tr "\0" "\n" < /proc/$(pidof openposterdb)/environ | grep MALLOC'`.
+  the command in [FORK.md](FORK.md#memory-what-is-measured-and-what-production-sets).
 - `MALLOC_MMAP_THRESHOLD_` costs one `mmap`/`munmap` and fresh zeroed pages per buffer ≥ 128 KiB. Wall
   time and latency did not get worse here. CPU time was not measured, and the thread peak rose from
   35 to 70–85, all short-lived blocking threads.
@@ -231,7 +254,8 @@ C3 settings, of which up to about 65 MB is prime renders in `image_mem_cache`.
 ## What is still worth doing (after the env settings)
 
 The goal is met with env settings, so the code changes below are optional; they are ranked by expected
-gain against risk.
+gain against risk. Items 1–3 were decided on 2026-11-25 (see "Decisions"): 1 is the next lever and is not
+built, 2 and 3 are not built.
 
 1. **Bound queued source fetches** (H3): a separate semaphore so that at most about
    2 × `RENDER_CONCURRENCY` requests hold a downloaded source while they wait for a render permit. Do not
@@ -249,11 +273,41 @@ gain against risk.
    in `spawn_blocking` instead of `tokio::fs::write`. Small, transient gain. Not worth a divergence
    from upstream on its own.
 
-## How to rerun
+## How to repeat this
 
-The P1.4 runner (in the fork job's `reports/P1.4-results/scripts/`) does, per variant: stop, wipe
-the cache and the database, start with the production env plus the variant's extras, bootstrap, prime
-(`prime.py`, concurrency 4), the side sampler, `burst.py --idle 90 --rss-abort-mb 3000`, a sanity
-fetch, and stop. On the dev box: one heavy job at a time; check
-`grep full /sys/fs/cgroup/user.slice/user-1100.slice/memory.pressure` first (avg60 < 20), and never leave
-the instance running (`pgrep -u dev -x openposterdb` must be empty afterwards).
+You need the heavy slot of the dev box (a real server and 490 renders; one heavy job at a time), the TMDB
+(and Fanart) key in `~/.config/opdb-dev.env`, and a release binary. Nothing here calls OMDb or MDBList: the
+harness refuses to run unless the server has `RATINGS_DISABLED=true` and no OMDb, MDBList or Trakt key.
+
+1. **Get a binary from a release image.** The image `ghcr.io/l0unk/openposterdb:<tag>` is public: take an
+   anonymous registry token, pull the manifest and the layer blobs, unpack the layers in order into an empty
+   folder, and use `usr/local/bin/openposterdb` as the binary and `app/dist` as the web directory (any
+   OCI tool does the same, e.g. `docker create` plus `docker cp`; the binary needs a glibc as new as Debian 12's,
+   2.36). On the dev box `/home/dev/opdb-fork/tools/rc-image.sh --extract-only <tag>` does this (it lives
+   outside the repo, is specific to that box, and prints `BINARY=` and `STATIC_DIR=` as its last lines).
+2. **Check the slice is quiet:** `grep full /sys/fs/cgroup/user.slice/user-1100.slice/memory.pressure`
+   (`avg60` below 20); `run-variant.sh` refuses to start otherwise.
+3. **One variant is one command.** It stops any instance, wipes cache and database, starts the server with
+   the nine production settings plus your extras, bootstraps the admin and an API key, runs the warm-up, runs
+   the burst and stops the server:
+
+   ```sh
+   S=scripts/louk
+   eval "$(/home/dev/opdb-fork/tools/rc-image.sh --extract-only v1.3.0-louk.1 2>/dev/null | sed 's/^/export /')"  # BINARY, STATIC_DIR
+   $S/run-variant.sh --binary "$BINARY" --static-dir "$STATIC_DIR" A --                                          # upstream behaviour
+   $S/run-variant.sh --binary "$BINARY" --static-dir "$STATIC_DIR" C3 -- \
+       BACKDROP_MAX_WIDTH=1920 MALLOC_ARENA_MAX=2 MALLOC_MMAP_THRESHOLD_=131072                                   # the decision
+   python3 -I $S/results-table.py        # compare every run in ~/opdb-dev/results
+   ```
+
+   The other rows of the table are `BACKDROP_MAX_WIDTH=1920` (C), `+ MALLOC_ARENA_MAX=2` (C2), the same two
+   `MALLOC_*` without the cap (A3), and the allocators: `LD_PRELOAD=<library>` (Debian's `libjemalloc2` with
+   `MALLOC_CONF=background_thread:true,dirty_decay_ms:1000,muzzy_decay_ms:1000`, or `libmimalloc2.0`). Run a
+   variant twice: the spread between repeats was 5–7%. Always take the numbers from runs that are not INVALID
+   (`results-table.py` marks them).
+4. **Why the warm-up exists.** A fresh process has empty in-memory id and TMDB-list caches, so the cold burst
+   would send all 490 lookups to the TMDB API at once and TMDB answers 429 (run A0). The warm-up
+   (`burst.py --warmup`, concurrency 4, other render cache keys than the burst) fills those caches and leaves
+   every burst render cold. `run-variant.sh --no-warmup` reproduces A0. Details: `scripts/louk/README.md`.
+5. **Afterwards** `pgrep -u dev -x openposterdb` must print nothing (the script stops the instance on every
+   exit path). `scripts/louk/selftest.sh` checks the harness against a stub server without a real server.

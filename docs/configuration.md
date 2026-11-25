@@ -62,3 +62,15 @@ These variables exist only in the loukdekker.nl fork (see [docs/louk/FORK.md](lo
 |---|---|---|
 | `RATINGS_DISABLED` | `false` | **For dev and test instances only; never in production.** `true`, `1`, `yes` or `on` (any case, surrounding spaces ignored; `false`/`0`/`no`/`off`/empty mean off, any other value stops startup with an error) ignores `OMDB_API_KEY`, `MDBLIST_API_KEY` and `TRAKT_CLIENT_ID` (those clients are never built, so no rating quota is spent), skips the "one ratings source" startup check, and skips every rating lookup including TMDB votes. Images render without badges, and the `available_ratings` index is neither read nor written. Never run it behind a CDN or with `ENABLE_CDN_REDIRECTS=true`: CDN responses carry long cache lifetimes and would keep the badge-less art |
 | `BACKDROP_MAX_WIDTH` | unset | Integer from 320 to 3840. Unset (or invalid, which logs a warning and is ignored) keeps upstream widths. When set, backdrops whose `imageSize` is wider than this (`large`/`very-large` are 3840 px; `medium` 1920, `small` 1280) render at this width instead, keeping the aspect ratio and scaling badges with the canvas; the TMDB source is fetched at the smallest of `w1280`/`original` that covers it. Capped renders carry a `.mw<N>` cache-key token (and their own CDN-redirect hash), so they never mix with uncapped ones; sizes the cap does not reduce keep their upstream keys. Logos, posters and episode stills are unaffected. Production: `BACKDROP_MAX_WIDTH=1920` |
+
+### Recommended production environment
+
+For the loukdekker.nl production container (measured, see [docs/louk/memory.md](louk/memory.md)). Together they cut the peak memory under a catalog burst from about 2.4 GB to about 0.75–0.8 GB (31–33%); keep the container limit at `1536m`.
+
+| Variable | Value | Why |
+|---|---|---|
+| `BACKDROP_MAX_WIDTH` | `1920` | Large backdrops render at 1920 px instead of 3840 px: a quarter of the pixels, smaller files, p95 latency about 38% lower. |
+| `MALLOC_ARENA_MAX` | `2` | glibc setting, not an app setting: without it each parallel render thread gets its own malloc arena and keeps its freed image buffers (up to 48 arenas). |
+| `MALLOC_MMAP_THRESHOLD_` | `131072` | glibc setting, not an app setting: fixes the threshold so every buffer of 128 KiB or more is its own mapping and goes back to the OS when freed (by default glibc raises it up to 32 MiB and then never returns these buffers). |
+
+The two `MALLOC_*` variables also help the unmodified upstream image: with them alone, without the width cap, the same burst peaks at about 0.9 GB instead of about 2.4 GB. Set all three in the container's `environment`, and check afterwards that they reached the process (see [FORK.md](louk/FORK.md#memory-what-is-measured-and-what-production-sets)).
