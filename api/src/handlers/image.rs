@@ -525,6 +525,7 @@ async fn try_cdn_redirect(
         return None;
     }
     let hash = serve::settings_hash(settings, kind, image_size);
+    let hash = crate::louk::backdrop_cap::cdn_hash(&state.config.louk, kind, image_size, hash); // louk-fork:
     state
         .settings_hash_registry
         .insert(hash.clone(), settings.clone())

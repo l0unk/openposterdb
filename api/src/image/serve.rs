@@ -394,6 +394,7 @@ pub fn cdn_image_response(bytes: Bytes, max_age: u64, content_type: &'static str
 /// Read available rating sources for a movie, checking the in-memory cache
 /// before falling through to SQLite.
 async fn read_available_ratings_cached(state: &AppState, id_key: &str) -> Option<String> {
+    if state.config.louk.ratings_disabled { return None; } // louk-fork: never build keys from sources an enabled run recorded
     let db = state.db.clone();
     let min_stale = state.config.ratings_min_stale_secs;
     let max_age = state.config.ratings_max_age_secs;
@@ -416,6 +417,7 @@ async fn upsert_available_ratings_cached(
     sources: &str,
     release_date: Option<&str>,
 ) {
+    if state.config.louk.ratings_disabled { return; } // louk-fork: no real sources; don't erase the index with ""
     if let Err(e) = cache::upsert_available_ratings(&state.db, id_key, sources, release_date).await {
         tracing::warn!(error = %e, key = %id_key, "available_ratings upsert failed");
     }
@@ -444,6 +446,7 @@ async fn resolve_with_ratings(
     uplift_episodes: bool,
     skip_ratings: bool,
 ) -> Result<(id::ResolvedId, ratings::RatingsResult, CrossIdInfo), AppError> {
+    let skip_ratings = crate::louk::config::effective_skip_ratings(&state.config.louk, skip_ratings); // louk-fork:
     let id_resolve_start = Instant::now();
     let mut resolved = id::resolve(id_type, id_value, &state.tmdb, &state.id_cache).await?;
 
@@ -1194,10 +1197,7 @@ fn trigger_logo_backdrop_refresh(
                 resolved_size.logo_target_width(),
                 resolved_size.badge_scale(cache::ImageType::Logo) * badge_size_factor,
             ),
-            LogoBackdropKind::Backdrop => (
-                resolved_size.backdrop_target_width(),
-                resolved_size.badge_scale(cache::ImageType::Backdrop) * badge_size_factor,
-            ),
+            LogoBackdropKind::Backdrop => crate::louk::backdrop_cap::render_dims(&state2.config.louk, resolved_size, badge_size_factor), // louk-fork:
         };
         let bytes = match lb_kind {
             LogoBackdropKind::Logo => generate::generate_logo(image_bytes, badges, state2.font.clone(), params.badge_style, params.label_style, params.appearance, state2.render_semaphore.clone(), target_width, badge_scale).await?,
@@ -1636,7 +1636,7 @@ async fn try_tmdb_logo_backdrop(
         cache::ImageType::Poster | cache::ImageType::Episode => &tmdb_images.posters,
     };
     let selected = crate::services::tmdb::TmdbClient::select_image(candidates, lang, textless)?;
-    let size = resolve_image_size(image_size).tmdb_size();
+    let size = crate::louk::backdrop_cap::tmdb_size(&state.config.louk, kind, image_size); // louk-fork:
     state.tmdb.fetch_image_bytes(&selected.file_path, size).await.ok()
 }
 
@@ -1862,6 +1862,7 @@ pub async fn handle_logo_backdrop_inner(
     if let Some(available) = fast_path_available {
         let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, type_ratings_limit);
         let suffix = settings_cache_suffix_with_ratings(settings, kind, image_size, &ratings_suffix);
+        let suffix = crate::louk::backdrop_cap::backdrop_suffix(&state.config.louk, kind, image_size, suffix); // louk-fork:
         let cache_key = format!("{id_type_str}/{id_value}{variant}{suffix}");
         let cache_path_base = format!("{id_value}{variant}{suffix}");
         let cache_path = cache::typed_cache_path(&state.config.cache_dir, image_type, id_type_str, &cache_path_base)?;
@@ -1899,6 +1900,7 @@ pub async fn handle_logo_backdrop_inner(
     let ratings_suffix = ratings::badges_cache_suffix(&badges);
 
     let suffix = settings_cache_suffix_with_ratings(settings, kind, image_size, &ratings_suffix);
+    let suffix = crate::louk::backdrop_cap::backdrop_suffix(&state.config.louk, kind, image_size, suffix); // louk-fork:
     let cache_key = format!("{id_type_str}/{id_value}{variant}{suffix}");
     let cache_path_base = format!("{id_value}{variant}{suffix}");
     let cache_path = cache::typed_cache_path(&state.config.cache_dir, image_type, id_type_str, &cache_path_base)?;
@@ -2036,10 +2038,7 @@ pub async fn handle_logo_backdrop_inner(
                     resolved_size.logo_target_width(),
                     resolved_size.badge_scale(cache::ImageType::Logo) * ctx.badge_size_factor,
                 ),
-                LogoBackdropKind::Backdrop => (
-                    resolved_size.backdrop_target_width(),
-                    resolved_size.badge_scale(cache::ImageType::Backdrop) * ctx.badge_size_factor,
-                ),
+                LogoBackdropKind::Backdrop => crate::louk::backdrop_cap::render_dims(&ctx.state.config.louk, resolved_size, ctx.badge_size_factor), // louk-fork:
             };
             let bytes = match lb_kind {
                 LogoBackdropKind::Logo => generate::generate_logo(image_bytes, ctx.badges, ctx.state.font.clone(), ctx.type_badge_style, ctx.type_label_style, ctx.type_appearance, ctx.state.render_semaphore.clone(), target_width, badge_scale).await?,

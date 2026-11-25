@@ -53,3 +53,12 @@ At minimum you need a **TMDB key** (for artwork), a **JWT secret** (for auth), a
 | Variable | Default | Description |
 |---|---|---|
 | `RUST_LOG` | `warn` | Log level filter — levels: `error`, `warn`, `info`, `debug`, `trace`. Supports comma-separated per-module overrides. Relevant modules: `openposterdb_api` (app), `tower_http` (HTTP tracing), `sea_orm` / `sqlx` (database), `reqwest` / `hyper` (HTTP client/server). Example: `warn,openposterdb_api=info,tower_http=debug` |
+
+## Fork-only (loukdekker.nl)
+
+These variables exist only in the loukdekker.nl fork (see [docs/louk/FORK.md](louk/FORK.md)). Unset, the server behaves exactly like upstream.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RATINGS_DISABLED` | `false` | **For dev and test instances only; never in production.** `true`, `1`, `yes` or `on` (any case, surrounding spaces ignored; `false`/`0`/`no`/`off`/empty mean off, any other value stops startup with an error) ignores `OMDB_API_KEY`, `MDBLIST_API_KEY` and `TRAKT_CLIENT_ID` (those clients are never built, so no rating quota is spent), skips the "one ratings source" startup check, and skips every rating lookup including TMDB votes. Images render without badges, and the `available_ratings` index is neither read nor written. Never run it behind a CDN or with `ENABLE_CDN_REDIRECTS=true`: CDN responses carry long cache lifetimes and would keep the badge-less art |
+| `BACKDROP_MAX_WIDTH` | unset | Integer from 320 to 3840. Unset (or invalid, which logs a warning and is ignored) keeps upstream widths. When set, backdrops whose `imageSize` is wider than this (`large`/`very-large` are 3840 px; `medium` 1920, `small` 1280) render at this width instead, keeping the aspect ratio and scaling badges with the canvas; the TMDB source is fetched at the smallest of `w1280`/`original` that covers it. Capped renders carry a `.mw<N>` cache-key token (and their own CDN-redirect hash), so they never mix with uncapped ones; sizes the cap does not reduce keep their upstream keys. Logos, posters and episode stills are unaffected. Production: `BACKDROP_MAX_WIDTH=1920` |
