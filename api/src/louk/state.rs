@@ -46,6 +46,8 @@ pub struct LoukState {
     pub season_jobs: DashMap<i64, ()>,
     /// Per-title art overrides (in-memory mirror of `louk_overrides`).
     pub overrides: crate::louk::overrides::store::OverrideStore,
+    /// Stale-while-revalidate slots and counters (`LOUK_RATINGS_SWR`).
+    pub swr: crate::louk::swr::SwrState,
 }
 
 impl LoukState {
@@ -58,6 +60,7 @@ impl LoukState {
             dropped: AtomicU64::new(0),
             season_jobs: DashMap::new(),
             overrides: crate::louk::overrides::store::OverrideStore::new(),
+            swr: crate::louk::swr::SwrState::new(),
         }
     }
 }

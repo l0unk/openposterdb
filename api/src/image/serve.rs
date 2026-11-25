@@ -733,6 +733,7 @@ pub async fn handle_inner(
         } else {
             read_available_ratings_cached(state, &id_key).await
         };
+        let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
         if let Some(available) = fast_path_available {
             let available_ratings_ms = fast_path_start.elapsed().as_millis() as u64;
             let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, settings.ratings_limit);
@@ -765,6 +766,7 @@ pub async fn handle_inner(
                             "slow poster request (fast path hit)"
                         );
                     }
+                    if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::Poster { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
                     return Ok((bytes, release_date));
                 }
             }
@@ -1721,6 +1723,7 @@ pub async fn handle_episode_inner(
     } else {
         read_available_ratings_cached(state, &id_key).await
     };
+    let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
     if let Some(available) = fast_path_available {
         let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, settings.episode_ratings_limit);
         let suffix = settings_cache_suffix_with_ratings(&settings, cache::ImageType::Episode, image_size, &ratings_suffix);
@@ -1733,6 +1736,7 @@ pub async fn handle_episode_inner(
             trigger_episode_refresh(s, k, p, id_type, id_value, &cache_suffix, &settings, image_size);
         }).await? {
             let release_date = cache::read_meta_db(&state.db, &cache_key).await;
+            if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::Episode { id_type: id_type_str.into(), id_value: id_value_jpg.into(), settings: settings.clone(), image_size }); } // louk-fork: SWR
             return Ok((bytes, release_date));
         }
     }
@@ -1875,6 +1879,7 @@ pub async fn handle_logo_backdrop_inner(
     } else {
         read_available_ratings_cached(state, &id_key).await
     };
+    let (fast_path_available, louk_swr) = crate::louk::swr::fast_path_sources(state, &id_key, fast_path_available).await; // louk-fork: SWR
     if let Some(available) = fast_path_available {
         let ratings_suffix = ratings::badges_suffix_from_available(&available, &settings.ratings_order, &settings.ratings_exclude, type_ratings_limit);
         let suffix = settings_cache_suffix_with_ratings(settings, kind, image_size, &ratings_suffix);
@@ -1892,6 +1897,7 @@ pub async fn handle_logo_backdrop_inner(
                 trigger_logo_backdrop_refresh(s, k, p, id_type, &id_value, &lb_cache_suffix, &settings, lb_kind, image_size);
             }).await? {
                 let release_date = cache::read_meta_db(&state.db, &cache_key).await;
+                if louk_swr { crate::louk::swr::revalidate(state, &cache_key, crate::louk::swr::Replay::LogoBackdrop { id_type: id_type_str.into(), id_value: id_value_raw.into(), settings: settings.clone(), kind: lb_kind, image_size }); } // louk-fork: SWR
                 return Ok((bytes, release_date));
             }
         }

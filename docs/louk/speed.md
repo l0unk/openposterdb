@@ -257,3 +257,29 @@ U='http://openposterdb:3000/<key>/tmdb/backdrop-default/movie-1368337.jpg?imageS
 E=$(curl -sI "$U" | tr -d '\r' | awk -F': ' 'tolower($1)=="etag"{print $2}')
 curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -H "If-None-Match: $E" "$U"   # 304 0
 ```
+
+### Stale-while-revalidate for a stale ratings index (`LOUK_RATINGS_SWR`, off by default)
+
+Built as designed: `louk::swr::fast_path_sources` (one line after each of the three fast-path index
+lookups) falls back to the stored `available_ratings` row whatever its age; on a cache hit built from a
+stale row, `louk::swr::revalidate` (one line before the hit's `return`) replays the same request in the
+background inside a task-local scope in which the fast path behaves exactly as upstream. So the replay
+is upstream's slow path: one ratings fetch (`ratings_cache` coalesces concurrent ones), index upsert,
+and a render under a new key if the source set changed, or the existing file refresh if the file is
+stale. Bounds: one replay per cache key (`refresh_locks`, key `louk-swr:<cache key>`), at most two at
+once; when both are busy the request is served stale without a replay and a later request tries again,
+so replays never pile up during a burst. Ignored with `RATINGS_DISABLED`.
+
+How to see it in production (after setting `LOUK_RATINGS_SWR=true`):
+
+```sh
+dlogs openposterdb --since 24h --grep louk-swr            # one pair per stale title
+# "louk-swr: served stale index, revalidating" = a client that did not wait;
+# "louk-swr: revalidated key=... elapsed_ms=N" = the wait it was spared (ratings fetch + any render).
+```
+
+Not verifiable on the dev box (no rating keys by rule): the real MDBList/OMDb latency removed, and a
+replay whose ratings fetch goes to the network. The route tests (`api/tests/louk_swr.rs`) seed ratings
+into `ratings_cache` and prove: stale hits serve the cached image, five concurrent stale hits start
+one replay, the replay refreshes the index and releases its lock, off = upstream (the request itself
+refreshes the index before answering), and nothing happens with `RATINGS_DISABLED`.

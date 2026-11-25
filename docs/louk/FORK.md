@@ -33,6 +33,7 @@ Two settings, the title dashboard (backend and admin pages), a load harness and 
 | `BACKDROP_MAX_WIDTH` | Caps how wide `large` and `very-large` backdrops are drawn. A 3840 px backdrop uses about 4 times the memory of a 1920 px one, and many TMDB originals are only 1920 px wide and were being stretched. Badges scale with the picture. Posters, logos, episode stills and the `small`/`medium` backdrops are not touched. | Set the env var to a number from 320 to 3840, e.g. `BACKDROP_MAX_WIDTH=1920`. | Unset = exactly upstream. A bad value (e.g. `1920px`) is ignored with a warning, so you get upstream's 3840 again. |
 | `RATINGS_DISABLED` | For dev and test only. No rating lookups at all, no badges, and the server starts without any rating provider. It guarantees a local instance or a load test can never call MDBList or OMDb. | `RATINGS_DISABLED=true`. A typo stops the server at startup instead of silently spending quota. | Off. **Never set it in production.** |
 | `LOUK_HTTP_ETAG` (speed) | Image responses get an `ETag`, and a client that already has the image gets a `304` with no body instead of the whole picture again. AIOMetadata's art proxy already passes `If-None-Match` and 304s through, so clients revalidate their hourly copies for a few hundred bytes instead of 68-475 KB. See `docs/louk/speed.md`. | On by default (it only adds a header; the image and every other header stay the same). `LOUK_HTTP_ETAG=false` turns it off. | On. |
+| `LOUK_RATINGS_SWR` (speed) | When a title's list of rating sources is older than its refresh interval (daily for new releases), upstream makes the request wait for MDBList (up to a few seconds) and then usually sends the old picture anyway. With this on, the cached picture goes out at once and the same request runs again in the background to fetch the ratings and redraw. Same number of rating calls. | `LOUK_RATINGS_SWR=true`. | Off (that one answer may show the previous ratings). |
 | Load harness | Scripts to start a local instance and fire a catalog-sized burst (150 titles x poster, backdrop, logo, plus 40 episode stills) while recording peak memory and latency. Meant to measure memory. | `scripts/louk/README.md`. | Not part of the image. |
 | Backdrop safe-area notes | Where the AIOStreams app crops and darkens backdrops, and which existing settings keep ratings visible. No code. | See "Backdrop safe areas" below. | Nothing changes by itself. |
 
@@ -212,6 +213,8 @@ lines, so a change by upstream to those lines conflicts. **high** = the whole fi
 | `api/src/main.rs:228` | The `image_mem_cache` weigher calls `louk::http_cache::note_insert`, which hashes a newly inserted image once and remembers its tag. | low |
 | `api/src/image/serve.rs:664` | `check_caches`, memory-hit branch: `louk::http_cache::note_key` tells the ETag layer which entry the request serves. | low |
 | `api/tests/common/mod.rs:105` | The test `image_mem_cache` gets the same weigher hook (weight 1, so capacity is unchanged). | low |
+| `api/src/image/serve.rs:736,1726,1882` | Fast paths of `handle_inner`, `handle_episode_inner`, `handle_logo_backdrop_inner`: one line after the `available_ratings` lookup, `louk::swr::fast_path_sources` falls back to a stale row when `LOUK_RATINGS_SWR` is on (else returns upstream's value unchanged). | low |
+| `api/src/image/serve.rs:769,1739,1900` | The same three fast-path hits: one line before `return`, `louk::swr::revalidate` replays the request in the background when the key came from a stale row. | low |
 | `api/src/handlers/image.rs:528` | `try_cdn_redirect`: one added line gives capped backdrops their own `/c/<hash>/` URL. | low |
 | `api/src/handlers/preview.rs:306` | `preview_backdrop`: width and badge scale from `render_dims`. Replaces 2 upstream lines with 1. | medium |
 | `api/src/handlers/preview.rs:327` | `preview_backdrop`: one added line for the capped preview cache key. | low |
@@ -246,6 +249,7 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `api/src/louk/mod.rs` | Fork module root. |
 | `api/src/louk/config.rs` | `LoukConfig`, reads `RATINGS_DISABLED`, `BACKDROP_MAX_WIDTH`, `LOUK_HTTP_ETAG` and `LOUK_RATINGS_SWR`. |
 | `api/src/louk/http_cache.rs` | `ETag`/304 middleware for image routes, the weigher and `check_caches` hooks, tag side map (tags only, no bytes). |
+| `api/src/louk/swr.rs` | Stale-while-revalidate for a stale ratings index: stale-row lookup, background replay (deduplicated, at most 2), counters. |
 | `api/src/louk/backdrop_cap.rs` | All the cap logic (size plan, cache-key token, CDN hash, TMDB size) and its unit tests. |
 | `api/tests/louk_backdrop_cap.rs` | Route-level tests for the cap. |
 | `api/src/louk/schema.rs` | Fork tables (`louk_titles`, `louk_title_aliases`, `louk_episodes`), additive only. |
@@ -260,6 +264,7 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
 | `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 | `api/tests/louk_http_cache.rs` | Route tests for the ETag layer. |
+| `api/tests/louk_swr.rs` | Route tests for `LOUK_RATINGS_SWR`. |
 
 ### Workflow differences
 

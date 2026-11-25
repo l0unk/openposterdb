@@ -9,4 +9,5 @@ pub mod overrides;
 pub mod routes;
 pub mod schema;
 pub mod state;
+pub mod swr;
 pub mod titles;
