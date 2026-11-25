@@ -23,7 +23,9 @@ use openposterdb_api::AppState;
 use openposterdb_api::cache::{self, ImageType, MemCacheEntry};
 use openposterdb_api::id::{EpisodeInfo, MediaType, ResolvedId};
 use openposterdb_api::louk::config::LoukConfig;
-use openposterdb_api::louk::overrides::{apply, store};
+use openposterdb_api::louk::overrides::{
+    OverrideKey, OverrideSource, TitleOverride, apply, purge, store, uploads,
+};
 use openposterdb_api::louk::titles;
 use openposterdb_api::services::ratings::{RatingBadge, RatingSource, RatingsResult};
 
@@ -639,4 +641,197 @@ async fn defaults_unchanged_without_override() {
             .await
             .is_empty()
     );
+}
+
+// --- fix round: delayed re-purge, failed sources, purge before refetch ------
+
+async fn seed_logo_file(
+    state: &AppState,
+    id_type: &str,
+    value: &str,
+    suffix: &str,
+) -> std::path::PathBuf {
+    let cache_value = format!("{value}{suffix}");
+    let path = cache::typed_cache_path(
+        &state.config.cache_dir,
+        ImageType::Logo,
+        id_type,
+        &cache_value,
+    )
+    .unwrap();
+    cache::write(&path, b"old logo").await.unwrap();
+    cache::upsert_meta_db(
+        &state.db,
+        &format!("{id_type}/{cache_value}"),
+        None,
+        ImageType::Logo,
+    )
+    .await
+    .unwrap();
+    path
+}
+
+#[tokio::test]
+async fn repurge_runs_after_the_delay_once_per_key() {
+    let a = app_with(true, false).await;
+    let st = &a.state;
+    titles::note_resolved(st, "imdb", "tt9200050", &movie(9_200_050, "tt9200050"));
+    let key = OverrideKey::parse("movie", "9200050", "logo", None, None, None).unwrap();
+
+    let delay = std::time::Duration::from_millis(300);
+    assert!(purge::schedule_repurge(st, &key, delay));
+    assert!(
+        purge::schedule_repurge(st, &key, delay),
+        "a second schedule joins the pending job"
+    );
+    assert_eq!(purge::pending_repurges(st), 1);
+    // A render that lands after the first purge (the race) is removed by the
+    // delayed one.
+    let late = seed_logo_file(st, "imdb", "tt9200050", "_l_t_en@.late.zm").await;
+    assert!(late.exists());
+    tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+    assert!(!late.exists(), "late render purged");
+    assert_eq!(purge::pending_repurges(st), 0);
+    assert!(meta_keys(st, "imdb/tt9200050%").await.is_empty());
+}
+
+#[tokio::test]
+async fn repurges_are_bounded() {
+    let a = app_with(true, false).await;
+    let hour = std::time::Duration::from_secs(3600);
+    for id in 1..=purge::MAX_PENDING_REPURGES {
+        let key = OverrideKey::parse(
+            "movie",
+            &(9_300_000 + id).to_string(),
+            "logo",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(purge::schedule_repurge(&a.state, &key, hour));
+    }
+    let extra = OverrideKey::parse("movie", "9399999", "logo", None, None, None).unwrap();
+    assert!(
+        !purge::schedule_repurge(&a.state, &extra, hour),
+        "beyond the cap new jobs are dropped"
+    );
+    assert_eq!(
+        purge::pending_repurges(&a.state),
+        purge::MAX_PENDING_REPURGES
+    );
+    // An already pending key is still accepted (it only moves its time).
+    let first = OverrideKey::parse("movie", "9300001", "logo", None, None, None).unwrap();
+    assert!(purge::schedule_repurge(&a.state, &first, hour));
+}
+
+#[tokio::test]
+async fn saving_and_clearing_schedule_a_repurge() {
+    let a = app_with(true, false).await;
+    let key = OverrideKey::parse("movie", "9200051", "logo", None, None, None).unwrap();
+    let before = tokio::time::Instant::now();
+    put_override(
+        &a,
+        "movie/9200051/logo",
+        serde_json::json!({"source": "tmdb", "value": "/x.png"}),
+    )
+    .await;
+    let due = purge::pending_repurge(&a.state, &key).expect("scheduled");
+    assert!(
+        due >= before + purge::REPURGE_AFTER_CHANGE,
+        "about 60 s later"
+    );
+    let (status, _) = send(
+        &a.app,
+        "DELETE",
+        "/api/admin/louk/overrides/movie/9200051/logo",
+        Some(&a.token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(purge::pending_repurges(&a.state), 1, "deduplicated");
+    assert!(purge::pending_repurge(&a.state, &key).unwrap() >= due);
+}
+
+#[tokio::test]
+async fn failed_override_source_schedules_one_repurge() {
+    let a = app_with(true, false).await;
+    let sha = upload(&a, png(64, 32)).await;
+    put_override(
+        &a,
+        "tv/9200052/logo",
+        serde_json::json!({"source": "upload", "value": sha}),
+    )
+    .await;
+    let key = OverrideKey::parse("tv", "9200052", "logo", None, None, None).unwrap();
+    let ov = store(&a.state)
+        .get_exact(&a.state.db, &key)
+        .await
+        .unwrap()
+        .unwrap();
+    // The upload disappears (or a TMDB/fanart fetch fails): automatic art.
+    let (path, _) = uploads::find_upload(&a.state.config.db_dir, &sha)
+        .await
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+    let s = show(9_200_052, "tt9200052", 92_052);
+    seed_ids(&a.state, &[("imdb/tt9200052", &s)]).await;
+    let (status, _, _) = get_image(
+        &a.app,
+        &format!("/{}/imdb/logo-default/tt9200052.png", a.key),
+    )
+    .await;
+    assert_ne!(status, StatusCode::OK, "no override art, no network art");
+    assert!(purge::source_failure_noted(&a.state, &key, ov.updated_at));
+    let due = purge::pending_repurge(&a.state, &key).expect("re-purge scheduled");
+    assert!(
+        due >= tokio::time::Instant::now() + purge::REPURGE_AFTER_CHANGE,
+        "the 10 min one"
+    );
+}
+
+#[tokio::test]
+async fn refetch_purges_an_overridden_kind_first() {
+    let a = app_with(true, false).await;
+    let st = &a.state;
+    let m = movie(9_200_060, "tt9200060");
+    titles::note_resolved(st, "imdb", "tt9200060", &m);
+    titles::flush_once(st).await.unwrap();
+    // An override saved earlier, and a render of the automatic art that
+    // survived it (the race / a failed source).
+    let sha = upload(&a, png(64, 32)).await;
+    let key = OverrideKey::parse("movie", "9200060", "logo", None, None, None).unwrap();
+    let ov = TitleOverride {
+        source: OverrideSource::Upload { sha256: sha },
+        no_badges: false,
+        updated_at: 1,
+    };
+    store(st).set(&st.db, &key, &ov).await.unwrap();
+    let stale = seed_logo_file(st, "imdb", "tt9200060", "_l_t_en@.stale.zm").await;
+    seed_ids(st, &[("imdb/tt9200060", &m), ("tmdb/movie-9200060", &m)]).await;
+
+    let (status, json) = send(
+        &a.app,
+        "POST",
+        "/api/admin/louk/titles/movie/9200060/refetch?kind=logo",
+        Some(&a.token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{json}");
+    assert!(!stale.exists(), "stale render purged before the re-render");
+    // (The re-render itself needs TMDB here: the purge also dropped the
+    // seeded id_cache entries, as upstream's purge does.)
+    // A kind without an override is not purged.
+    let poster = cache::typed_cache_path(
+        &st.config.cache_dir,
+        ImageType::Poster,
+        "imdb",
+        "tt9200060@.keep.zm",
+    )
+    .unwrap();
+    cache::write(&poster, b"poster").await.unwrap();
+    assert!(!purge::purge_if_overridden(st, "movie", 9_200_060, ImageType::Poster).await);
+    assert!(poster.exists());
 }

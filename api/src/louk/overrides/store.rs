@@ -9,7 +9,9 @@
 
 use std::collections::HashMap;
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+
+use dashmap::DashMap;
 
 use sea_orm::{ConnectionTrait, DatabaseBackend, DatabaseConnection, Statement, Value};
 
@@ -35,6 +37,9 @@ pub const OVERRIDES_TABLE_SQL: &str = "CREATE TABLE IF NOT EXISTS louk_overrides
         PRIMARY KEY (media_type, tmdb_id, kind, season, episode, lang)
     )";
 
+/// Seconds between retries of a failed first load.
+pub const LOAD_RETRY_SECS: i64 = 30;
+
 #[derive(Clone, Debug)]
 struct Row {
     kind: ImageType,
@@ -53,6 +58,13 @@ pub struct OverrideStore {
     /// Rows in the map, and rows with `no_badges` (cheap pre-checks).
     rows: AtomicUsize,
     no_badges_rows: AtomicUsize,
+    /// Unix seconds of the last failed first load (retries wait 30 s).
+    load_failed_at: AtomicI64,
+    /// Delayed re-purges waiting to run: job key → when (see `purge`).
+    pub(crate) repurges: DashMap<String, tokio::time::Instant>,
+    /// `(key, updated_at)` of overrides whose source failed once; each gets
+    /// one delayed re-purge.
+    pub(crate) source_failures: DashMap<String, ()>,
 }
 
 impl Default for OverrideStore {
@@ -80,6 +92,9 @@ impl OverrideStore {
             writes: tokio::sync::Mutex::new(()),
             rows: AtomicUsize::new(0),
             no_badges_rows: AtomicUsize::new(0),
+            load_failed_at: AtomicI64::new(0),
+            repurges: DashMap::new(),
+            source_failures: DashMap::new(),
         }
     }
 
@@ -94,11 +109,22 @@ impl OverrideStore {
     }
 
     /// The map, loading it on first use; `None` (logged) while the DB fails.
+    /// While the DB fails, a retry runs at most every [`LOAD_RETRY_SECS`], so a
+    /// broken DB does not cost one failing query and one warning per image.
     async fn loaded(&self, db: &DatabaseConnection) -> Option<&RwLock<Map>> {
+        if let Some(m) = self.map.get() {
+            return Some(m);
+        }
+        let now = chrono::Utc::now().timestamp();
+        let failed_at = self.load_failed_at.load(Ordering::Relaxed);
+        if failed_at > 0 && now - failed_at < LOAD_RETRY_SECS {
+            return None;
+        }
         match self.load(db).await {
             Ok(m) => Some(m),
             Err(e) => {
-                tracing::warn!(error = %e, "louk overrides: loading the table failed; serving without overrides");
+                self.load_failed_at.store(now, Ordering::Relaxed);
+                tracing::warn!(error = %e, "louk overrides: loading the table failed; serving without overrides (retry in 30 s)");
                 None
             }
         }
@@ -152,6 +178,23 @@ impl OverrideStore {
         episode: i32,
         lang: &str,
     ) -> Option<TitleOverride> {
+        self.lookup_keyed(db, media_type, tmdb_id, kind, season, episode, lang)
+            .await
+            .map(|(_, ov)| ov)
+    }
+
+    /// [`Self::lookup`], plus the key of the row that matched (its `lang`).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn lookup_keyed(
+        &self,
+        db: &DatabaseConnection,
+        media_type: &'static str,
+        tmdb_id: u64,
+        kind: ImageType,
+        season: i32,
+        episode: i32,
+        lang: &str,
+    ) -> Option<(OverrideKey, TitleOverride)> {
         let lock = self.loaded(db).await?;
         if self.is_empty() {
             return None;
@@ -163,7 +206,17 @@ impl OverrideStore {
                 .find(|r| {
                     r.kind == kind && r.season == season && r.episode == episode && r.lang == l
                 })
-                .map(|r| r.ov.clone())
+                .map(|r| {
+                    let key = OverrideKey {
+                        media_type,
+                        tmdb_id,
+                        kind,
+                        season,
+                        episode,
+                        lang: r.lang.clone(),
+                    };
+                    (key, r.ov.clone())
+                })
         };
         if matches!(kind, ImageType::Poster | ImageType::Logo) && !lang.is_empty() {
             if let Some(ov) = matching(lang) {
@@ -237,6 +290,30 @@ impl OverrideStore {
             ))
         });
         Ok(out)
+    }
+
+    /// Rows that win over `key` for some request languages: for an
+    /// any-language row every language row of the same kind/episode, for a
+    /// base-language row (`pt`) its regional rows (`pt-BR`).
+    pub async fn shadowing(
+        &self,
+        db: &DatabaseConnection,
+        key: &OverrideKey,
+    ) -> Result<Vec<(OverrideKey, TitleOverride)>, AppError> {
+        Ok(self
+            .list_title(db, key.media_type, key.tmdb_id)
+            .await?
+            .into_iter()
+            .filter(|(k, _)| {
+                k.kind == key.kind
+                    && k.season == key.season
+                    && k.episode == key.episode
+                    && k.lang != key.lang
+                    && (key.lang.is_empty()
+                        || (k.lang.len() > key.lang.len()
+                            && k.lang.starts_with(&format!("{}-", key.lang))))
+            })
+            .collect())
     }
 
     /// Insert or replace an override (DB first, then the map).

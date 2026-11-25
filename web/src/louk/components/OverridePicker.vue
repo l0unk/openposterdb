@@ -16,6 +16,7 @@ import {
   getCandidates,
   kindHasLanguage,
   languageLabel,
+  shadowNote,
   previewUrl,
   putOverride,
   sameArt,
@@ -451,11 +452,11 @@ async function save() {
       done(`Cleared the ${kindWord[kind.value]} override.`)
       return
     }
-    await putOverride(target, body, lang)
+    const res = await putOverride(target, body, lang)
     const what = t
       ? `Set the ${kindWord[kind.value]} to ${tileSummary(t)}${noBadges.value ? ', without badges' : ''}.`
       : `Turned the rating badges ${noBadges.value ? 'off' : 'on'} for this ${kindWord[kind.value]}.`
-    done(what)
+    done(what + shadowNote(res?.shadowed_by))
   } catch (e) {
     actionError.value = e instanceof Error ? e.message : 'The request failed'
   } finally {

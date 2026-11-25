@@ -100,7 +100,7 @@ impl OverrideSource {
                 }
                 Ok(Self::Fanart {
                     id: id.to_owned(),
-                    url: value.to_owned(),
+                    url: normalize_fanart_url(value),
                 })
             }
             "upload" => {
@@ -301,6 +301,15 @@ pub fn is_fanart_url(s: &str) -> bool {
     }
 }
 
+/// fanart.tv URLs are stored and compared as `https://` (its API still
+/// returns some `http://` URLs).
+pub fn normalize_fanart_url(url: &str) -> String {
+    match url.strip_prefix("http://assets.fanart.tv/") {
+        Some(rest) => format!("https://assets.fanart.tv/{rest}"),
+        None => url.to_owned(),
+    }
+}
+
 pub fn is_fanart_id(s: &str) -> bool {
     (1..=64).contains(&s.len())
         && s.bytes()
@@ -379,6 +388,18 @@ mod tests {
         assert!(OverrideSource::from_parts("upload", &"A".repeat(64), None).is_err());
         assert!(OverrideSource::from_parts("upload", "../etc/passwd", None).is_err());
         assert!(OverrideSource::from_parts("other", "", None).is_err());
+    }
+
+    #[test]
+    fn fanart_urls_are_stored_as_https() {
+        let s =
+            OverrideSource::from_parts("fanart", "http://assets.fanart.tv/fanart/x.png", Some("1"))
+                .unwrap();
+        assert_eq!(s.value(), "https://assets.fanart.tv/fanart/x.png");
+        assert_eq!(
+            normalize_fanart_url("https://assets.fanart.tv/a.png"),
+            "https://assets.fanart.tv/a.png"
+        );
     }
 
     #[test]
