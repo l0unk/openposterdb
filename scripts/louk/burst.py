@@ -19,6 +19,18 @@ needed). One caller would get ~250 instant 429s out of 490 requests, so by defau
 over fake X-Forwarded-For groups of --bucket-size (200) so that all 490 really render. --single-bucket sends no
 header (what one prod key sees); expect 429s and an INVALID run.
 
+--warmup runs the warm-up pass instead of the burst (run it once, after bootstrap, before the burst). A fresh
+server process has empty in-memory id / TMDB-image-list caches, so a cold burst would send all 490 lookups to
+the TMDB API at once and TMDB answers 429 (seen as 500 here). The warm-up requests the same titles once at low
+concurrency (--warmup-concurrency, default 4) under DIFFERENT render cache keys than the burst, so the lookups
+are cached but none of the burst's renders is: backdrops and episodes with ?imageSize=small, posters with
+?badge_style=v, logos with ?badge_style=h (the non-default style of each; with ratings disabled no badge is
+drawn, so it is the same work under another key). It uses its own X-Forwarded-For groups (10.253.x.1), so the
+burst's rate-limit buckets stay full. Same safety checks and RSS abort as the burst; it writes no result file.
+Exit codes: 0 ok, 2 server died, 3 failed (429, transport errors, or more than 5% errors: the lookups are
+not warm and the burst would be invalid). About 8 logos fail to decode upstream (500) in every run: that is
+under the 5%.
+
 A run is INVALID (JSON "valid": false, "invalid_reasons", INVALID in the summary line, exit code 3) when the
 server died or was aborted, more than 2% of requests errored, any 429 or transport error/timeout happened, or
 poster/backdrop/episode got fewer than 90% 200s: the server did less work, so its memory looks better than it is.
@@ -238,6 +250,28 @@ def build_requests(base, key, titles_doc, n_titles=None, n_episodes=None, seed=4
     return [(k, u, f"10.254.{i // bucket_size}.1") for i, (k, u) in enumerate(reqs)], n_buckets
 
 
+WARMUP_BUCKET_SIZE = 200
+WARMUP_MAX_ERROR_FRACTION = 0.05
+
+
+def build_warmup_requests(base, key, titles_doc, n_titles=None, n_episodes=None, bucket_size=WARMUP_BUCKET_SIZE):
+    """Same titles as build_requests, but every URL has a render cache key the burst does not use.
+
+    Returns [(kind, url, xff)] in titles.json order (not shuffled: low concurrency, order does not matter).
+    Posters/logos reject imageSize (400), so they vary badge_style instead; backdrops/episodes take imageSize.
+    """
+    base = base.rstrip("/")
+    reqs = []
+    for t in titles_doc["titles"][:n_titles]:
+        tp = "series" if t["type"] == "tv" else "movie"
+        reqs.append(("poster", f"{base}/{key}/imdb/poster-default/{t['imdb']}.jpg?badge_style=v"))
+        reqs.append(("backdrop", f"{base}/{key}/tmdb/backdrop-default/{tp}-{t['tmdb']}.jpg?imageSize=small"))
+        reqs.append(("logo", f"{base}/{key}/tmdb/logo-default/{tp}-{t['tmdb']}.png?badge_style=h"))
+    for e in titles_doc["episodes"][:n_episodes]:
+        reqs.append(("episode", f"{base}/{key}/imdb/episode-default/episode-{e['imdb']}-S{e['season']}E{e['episode']}.jpg?imageSize=small"))
+    return [(k, u, f"10.253.{i // bucket_size}.1") for i, (k, u) in enumerate(reqs)]
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *a, **k):
         return None
@@ -394,13 +428,17 @@ def main(argv=None):
     ap.add_argument("--episodes-limit", type=int, default=None)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--nice", type=int, default=19, help="nice the client (default 19)")
+    ap.add_argument("--warmup", action="store_true",
+                    help="run the warm-up pass instead of the burst (see the module docstring); writes no result file")
+    ap.add_argument("--warmup-concurrency", type=int, default=4,
+                    help="client threads for --warmup (default 4: low enough not to trip TMDB's rate limit)")
     args = ap.parse_args(argv)
 
     host = urllib.parse.urlsplit(args.base).hostname or ""
     if host not in [h.strip("[]") for h in LOCAL_HOSTS]:
         raise SystemExit(f"refusing to run: --base host {host!r} is not local")
-    if args.concurrency < 1 or args.idle < 0 or args.rss_abort_mb < 0:
-        raise SystemExit("bad --concurrency/--idle/--rss-abort-mb")
+    if args.concurrency < 1 or args.idle < 0 or args.rss_abort_mb < 0 or args.warmup_concurrency < 1:
+        raise SystemExit("bad --concurrency/--idle/--rss-abort-mb/--warmup-concurrency")
     if not 1 <= args.bucket_size <= BUCKET_BURST:
         raise SystemExit(f"--bucket-size must be 1..{BUCKET_BURST}")
     if not re.fullmatch(r"[A-Za-z0-9._+-]+", args.label):
@@ -424,6 +462,8 @@ def main(argv=None):
         raise SystemExit("--key-file does not contain a plausible API key")
     with open(args.titles) as f:
         doc = json.load(f)
+    if args.warmup:
+        return run_warmup(args, key, doc)
     reqs, n_buckets = build_requests(args.base, key, doc, args.titles_limit, args.episodes_limit, args.seed,
                                      args.bucket_size, args.single_bucket)
     cache_files, db_bytes = cache_state(env_subset, args.pid)
@@ -531,6 +571,44 @@ def main(argv=None):
         f.write(render_md(out))
     print(summary_line(out), f"-> {jpath}")
     return 2 if server_died else (3 if reasons else 0)
+
+
+def run_warmup(args, key, doc):
+    """Warm-up pass: low-concurrency requests under cache keys the burst does not use. Prints one line."""
+    reqs = build_warmup_requests(args.base, key, doc, args.titles_limit, args.episodes_limit)
+    try:
+        os.nice(args.nice)
+    except OSError:
+        pass
+    wait_for_pressure()
+    sampler = RssSampler(args.pid, abort_mb=args.rss_abort_mb)
+    sampler.start()
+    t0 = time.perf_counter()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.warmup_concurrency) as ex:
+        results = list(ex.map(lambda a: one_request(a[0], a[1], a[2], args.timeout), reqs))
+    wall_s = time.perf_counter() - t0
+    sampler.stop()
+    st_end = read_status(args.pid)
+    died = sampler.died or sampler.aborted or st_end is None
+    summ = summarize(results)
+    reasons = []
+    if sampler.aborted:
+        reasons.append(f"aborted: RSS > {args.rss_abort_mb} MB")
+    elif died:
+        reasons.append("server died")
+    if summ["status_counts"].get("429"):
+        reasons.append(f"{summ['status_counts']['429']}x 429")
+    if any(r["status"] is None for r in results):
+        reasons.append("transport errors/timeouts")
+    if summ["errors"] > WARMUP_MAX_ERROR_FRACTION * summ["requests"]:
+        reasons.append(f"{summ['errors']} errors (more than {int(WARMUP_MAX_ERROR_FRACTION * 100)}%: "
+                       f"the id/TMDB caches are not warm)")
+    per_kind = {k: v["status_counts"] for k, v in summ["kinds"].items()}
+    print(f"{'WARMUP FAILED (' + '; '.join(reasons) + ') ' if reasons else ''}warmup {args.label}: "
+          f"{summ['requests']} req at concurrency {args.warmup_concurrency} in {wall_s:.1f} s, "
+          f"{summ['errors']} err, statuses {json.dumps(per_kind, sort_keys=True)}, "
+          f"VmRSS {mb(st_end['rss_kb']) if st_end else None} MB, VmHWM {mb(st_end.get('hwm_kb')) if st_end else None} MB")
+    return 2 if died else (3 if reasons else 0)
 
 
 def invalid_prefix(o):

@@ -27,8 +27,12 @@ trap cleanup EXIT
 cat > "$TMP/stub" <<'PY'
 #!/usr/bin/env python3
 # Stand-in for openposterdb-api: auth/setup/login/keys + image routes with fake latency, RSS growth,
-# strict id forms (400 otherwise) and a per-(rightmost X-Forwarded-For | "unknown") limiter: more than 240
-# requests within 1 s -> 429, like upstream's burst of 240.
+# strict id forms (400 otherwise), upstream's query forms (poster/logo: ?badge_style=, backdrop/episode:
+# ?imageSize=; backdrop needs one), a per-(rightmost X-Forwarded-For | "unknown") limiter (more than 240
+# requests within 1 s -> 429, like upstream's burst of 240), and a stand-in for TMDB's API rate limit: the first
+# request for an id this process has not seen costs one "API call", and more than 100 calls within 1 s -> 500
+# (a fresh process hit by the whole burst at once; the warm-up avoids it). Every request path (key cut) goes to
+# stub-requests.txt so the self-test can check which render cache keys the warm-up and the burst used.
 import json, os, random, re, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 host, port = os.environ["LISTEN_ADDR"].rsplit(":", 1)
@@ -36,14 +40,24 @@ home = os.path.dirname(os.environ["CACHE_DIR"]) if "CACHE_DIR" in os.environ els
 os.makedirs(home, exist_ok=True)
 with open(os.path.join(home, "stub-env.txt"), "w") as f:  # names + a few safe values only
     for k in sorted(os.environ):
-        f.write(k + ("=" + os.environ[k] if k in ("RATINGS_DISABLED", "FOO", "MALLOC_ARENA_MAX", "STATIC_DIR", "OPDB_DEV_INSTANCE") else "") + "\n")
+        f.write(k + ("=" + os.environ[k] if k in ("RATINGS_DISABLED", "FOO", "MALLOC_ARENA_MAX", "MALLOC_MMAP_THRESHOLD_", "BACKDROP_MAX_WIDTH", "STATIC_DIR", "OPDB_DEV_INSTANCE") else "") + "\n")
 state = {"admin": False}
 hog = []
 hits, lock = {}, threading.Lock()
+seen_ids, api_calls = set(), []
+reqlog = open(os.path.join(home, "stub-requests.txt"), "a", buffering=1)
 ID_OK = {  # (route id type, kind) -> id form upstream accepts
     ("imdb", "poster"): r"tt\d+", ("imdb", "episode"): r"episode-tt\d+-S\d+E\d+",
     ("tmdb", "backdrop"): r"(movie|series)-\d+", ("tmdb", "logo"): r"(movie|series)-\d+",
 }
+def api_limited(ident):
+    """True when this id lookup would be rate-limited by the (stand-in) TMDB API."""
+    now = time.monotonic()
+    with lock:
+        if ident in seen_ids: return False
+        seen_ids.add(ident)
+        api_calls[:] = [t for t in api_calls if now - t < 1.0] + [now]
+        return len(api_calls) > 100
 def limited(bucket):
     now = time.monotonic()
     with lock:
@@ -61,13 +75,18 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/auth/status":
             return self.send(200, json.dumps({"setup_required": not state["admin"]}).encode())
-        m = re.match(r"^/([0-9a-f]+)/(imdb|tmdb)/(poster|backdrop|logo|episode)-default/([^?]+?)(\.jpg|\.png)(\?imageSize=large)?$", self.path)
+        m = re.match(r"^/([0-9a-f]+)/(imdb|tmdb)/(poster|backdrop|logo|episode)-default/([^?]+?)(\.jpg|\.png)(\?[a-zA-Z_]+=[a-z0-9]+)?$", self.path)
         if not m: return self.send(400, b"{}")
         kind, ident = m.group(3), m.group(4)
         if not re.fullmatch(ID_OK.get((m.group(2), kind), r"(?!)"), ident): return self.send(400, b"invalid id type")
-        if kind == "backdrop" and not m.group(6): return self.send(400, b"backdrop without imageSize=large")
+        query = m.group(6) or ""
+        QUERY_OK = {"poster": r"|\?badge_style=[hv]", "logo": r"|\?badge_style=[hv]",
+                    "backdrop": r"\?imageSize=(large|small)", "episode": r"|\?imageSize=small"}
+        if not re.fullmatch(QUERY_OK[kind], query): return self.send(400, b"query not accepted for " + kind.encode())
+        reqlog.write(re.sub(r"^/[0-9a-f]+", "", self.path) + "\n")
         xff = (self.headers.get("X-Forwarded-For") or "").rsplit(",", 1)[-1].strip() or "unknown"
         if limited(m.group(1)[:16] + ":" + xff): return self.send(429, b"{}")
+        if api_limited(m.group(2) + ":" + ident): return self.send(500, b"upstream API rate limited")
         time.sleep(random.uniform(0.01, 0.15))
         if kind == "logo" and hash(ident) % 5 == 0: return self.send(404, b"{}")
         if kind == "backdrop": hog.append(bytearray(os.urandom(256 * 1024)))  # visible RSS growth
@@ -124,6 +143,18 @@ check "stub: tmdb tv- prefix is 400"      test "$(http_code "$BASE/$K/tmdb/logo-
 check "stub: tmdb series- prefix is 200"  test "$(http_code "$BASE/$K/tmdb/backdrop-default/series-84773.jpg?imageSize=large")" = 200
 check "stub: imdb poster without tt is 400" test "$(http_code "$BASE/$K/imdb/poster-default/1234.jpg")" = 400
 
+# 1c. the warm-up pass: low concurrency, other render cache keys than the burst, no result file
+REQLOG="$OPDB_DEV_HOME/stub-requests.txt"; : > "$REQLOG"
+rc=0; burst --warmup --label selftest-warmup | tee "$TMP/linew" || rc=$?
+check "warmup: exit code 0"                 test "$rc" = 0
+check "warmup: 490 req at concurrency 4, no failure" bash -c "grep -q '^warmup selftest-warmup: 490 req at concurrency 4 ' '$TMP/linew' && ! grep -q FAILED '$TMP/linew'"
+check "warmup: writes no result file"       test ! -e "$TMP/results/selftest-warmup.json"
+check "warmup: stub saw 490 requests"       test "$(wc -l < "$REQLOG")" = 490
+check "warmup: poster/logo use badge_style (v / h), backdrop/episode imageSize=small" \
+  test "$(grep -cE '^/imdb/poster-default/tt[0-9]+\.jpg\?badge_style=v$' "$REQLOG"),$(grep -cE '^/tmdb/logo-default/(movie|series)-[0-9]+\.png\?badge_style=h$' "$REQLOG"),$(grep -cE '^/tmdb/backdrop-default/(movie|series)-[0-9]+\.jpg\?imageSize=small$' "$REQLOG"),$(grep -cE '^/imdb/episode-default/episode-tt[0-9]+-S[0-9]+E[0-9]+\.jpg\?imageSize=small$' "$REQLOG")" = "150,150,150,40"
+check "warmup: no request has a burst render key" bash -c "! grep -E 'imageSize=large|^/imdb/poster-default/tt[0-9]+\.jpg\$|^/tmdb/logo-default/[^?]+\.png\$|^/imdb/episode-default/[^?]+\.jpg\$' '$REQLOG'"
+check "warmup: key not printed"             bash -c "! grep -qF \"\$(cat '$KEYF')\" '$TMP/linew'"
+
 # 2. the default burst: spread over X-Forwarded-For groups, cold, valid
 rc=0; burst --label selftest --idle 2 | tee "$TMP/line1" || rc=$?
 R="$TMP/results/selftest.json"
@@ -145,6 +176,7 @@ check "burst: cold run recorded"      test "$(jget "d['cache_files_before']")" =
 check "burst: prod env complete"      test "$(jget "d['prod_env_complete'] is True and d['prod_env_missing']==[]")" = True
 check "burst: env recorded, no secrets" test "$(jget "d['env'].get('FOO') is None and d['env']['RATINGS_DISABLED']=='true' and 'TMDB_API_KEY' not in d['env']")" = True
 check "burst: summary says cold, no INVALID" bash -c "grep -q 'cold' '$TMP/line1' && ! grep -q INVALID '$TMP/line1'"
+check "burst: 490 more requests, none with a render key the warm-up used" test "$(wc -l < "$REQLOG"),$(sort -u "$REQLOG" | wc -l)" = "980,980"
 
 # 3. single bucket + warm cache: the stub 429s ~250 requests -> INVALID, exit 3
 mkdir -p "$OPDB_DEV_HOME/cache" && : > "$OPDB_DEV_HOME/cache/x.jpg"
@@ -177,6 +209,9 @@ for n in 1 2 3; do
   check "refuse: server env #$n (OMDB / no RATINGS_DISABLED / MDBLIST)" \
     refuses "refusing to run" python3 -I "$HERE/burst.py" --base "http://127.0.0.1:$q" --key-file "$KEYF" --pid "$p" --label x --out "$TMP/r3" --titles-limit 1
 done
+check "refuse: --warmup, server env without RATINGS_DISABLED" \
+  refuses "refusing to run" python3 -I "$HERE/burst.py" --warmup --base "http://127.0.0.1:$Q2" --key-file "$KEYF" --pid "$P2" --label x --out "$TMP/r3" --titles-limit 1
+check "refuse: --warmup, non-local base" refuses "not local" python3 -I "$HERE/burst.py" --warmup --base http://example.com:3900 --key-file "$KEYF" --pid "$PID" --label x --out "$TMP/r2"
 # a wrapper shell that owns no socket: the env check passes (it inherits RATINGS_DISABLED) but --pid must own the listener
 WPORT="$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
 env -i PATH="$PATH" RATINGS_DISABLED=true LISTEN_ADDR="127.0.0.1:$WPORT" CACHE_DIR="$TMP/rawW/cache" bash -c '"$0" & wait' "$TMP/stub" >/dev/null 2>&1 &
@@ -196,6 +231,12 @@ check "abort: server was stopped"           bash -c "sleep 0.5; ! kill -0 $P5 2>
 check "abort: not-prod env warned and recorded" test "$(jget "d['prod_env_complete'] is False and 'IMAGE_QUALITY' in d['prod_env_missing']")" = True
 check "abort: warning printed"              grep -q "SPEC section 2" "$TMP/err3"
 
+# 5b. RSS abort during the warm-up too
+start_raw 6 RATINGS_DISABLED=true; P6=$RAW_PID; Q6=$RAW_PORT; wait_port "$Q6" || bad "warmup abort stub did not start"
+rc=0; python3 -I "$HERE/burst.py" --warmup --base "http://127.0.0.1:$Q6" --key-file "$KEYF" --pid "$P6" --label selftest-wabort \
+  --rss-abort-mb 1 --titles-limit 3 --episodes-limit 1 --out "$TMP/results" >"$TMP/line4" 2>/dev/null || rc=$?
+check "warmup abort: exit code 2, server stopped, FAILED" bash -c "test $rc = 2 && sleep 0.5 && ! kill -0 $P6 2>/dev/null && grep -q '^WARMUP FAILED (aborted' '$TMP/line4'"
+
 # 6. stop, pidfile reuse and orphans
 "$HERE/dev-instance.sh" stop >/dev/null
 check "stop: process gone" bash -c "! kill -0 $PID 2>/dev/null"
@@ -209,5 +250,33 @@ check "start: refuses while an orphan runs" bash -c "! '$HERE/dev-instance.sh' s
 "$HERE/dev-instance.sh" stop >/dev/null
 check "stop: kills an orphan without pidfile" bash -c "! kill -0 $PID2 2>/dev/null"
 check "stop: did not kill this shell"         kill -0 $$
+# 7. run-variant.sh end to end (stop -> wipe -> start with extra env -> bootstrap -> warm-up -> burst -> stop)
+export OPDB_BINARY="$TMP/stub" OPDB_RESULTS="$TMP/rv" OPDB_SETTLE_S=0
+rv() { "$HERE/run-variant.sh" "$@" > "$TMP/rv.log" 2>&1; }
+: > "$REQLOG"
+rc=0; rv rv-ok --idle 1 -- MALLOC_ARENA_MAX=2 MALLOC_MMAP_THRESHOLD_=131072 BACKDROP_MAX_WIDTH=1920 || rc=$?
+check "run-variant: exit code 0"              test "$rc" = 0
+R="$TMP/rv/rv-ok.json"
+check "run-variant: valid 490-request burst"  test "$(jget "d['valid'] is True and d['requests']==490 and d['errors']==0")" = True
+check "run-variant: extra env reached the server" bash -c "grep -qx 'MALLOC_ARENA_MAX=2' '$ENVTXT' && grep -qx 'MALLOC_MMAP_THRESHOLD_=131072' '$ENVTXT' && grep -qx 'BACKDROP_MAX_WIDTH=1920' '$ENVTXT'"
+check "run-variant: env recorded in the result" test "$(jget "d['env']['MALLOC_ARENA_MAX']=='2' and d['env']['BACKDROP_MAX_WIDTH']=='1920' and d['prod_env_complete']")" = True
+check "run-variant: log shows the vars present, names only" bash -c "grep -q '^env MALLOC_ARENA_MAX present' '$TMP/rv.log' && grep -q '^env MALLOC_MMAP_THRESHOLD_ present' '$TMP/rv.log' && ! grep -E '^server pid .*env names:.*=' '$TMP/rv.log'"
+check "run-variant: warm-up ran before the burst" bash -c "grep -q '^warmup rv-ok: 490 req' '$TMP/rv.log' && test \"\$(wc -l < '$REQLOG')\" = 980"
+check "run-variant: key not in the log"       bash -c "! grep -qF \"\$(cat '$KEYF')\" '$TMP/rv.log'"
+check "run-variant: instance stopped afterwards" test "$("$HERE/dev-instance.sh" status)" = stopped
+
+rc=0; rv --no-warmup rv-cold --idle 1 || rc=$?
+R="$TMP/rv/rv-cold.json"
+check "run-variant --no-warmup: INVALID (id lookups rate-limited), exit 3" bash -c "test $rc = 3 && grep -q 'warm-up skipped' '$TMP/rv.log'" 
+check "run-variant --no-warmup: 500s recorded" test "$(jget "d['valid'] is False and d['status_counts'].get('500',0) > 100")" = True
+
+rc=0; rv rv-fail --idle 1 --warmup-concurrency 400 || rc=$?
+check "run-variant: failed warm-up stops before the burst (exit 4)" bash -c "test $rc = 4 && grep -q '^WARMUP FAILED' '$TMP/rv.log' && ! grep -q '^burst exit' '$TMP/rv.log' && test ! -e '$TMP/rv/rv-fail.json'"
+check "run-variant: instance stopped after a failed warm-up" test "$("$HERE/dev-instance.sh" status)" = stopped
+
+rc=0; rv rv-bad -- OMDB_API_KEY=x || rc=$?
+check "run-variant: refuses a rating-provider key, nothing left running" bash -c "test $rc = 1 && '$HERE/dev-instance.sh' status | grep -qx stopped"
+rc=0; OPDB_BINARY=/nonexistent rv rv-bad || rc=$?
+check "run-variant: refuses a missing binary" test "$rc" = 1
 echo "selftest: $pass passed, $fail failed"
 [[ $fail -eq 0 ]]

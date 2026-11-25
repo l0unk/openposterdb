@@ -20,13 +20,13 @@ by settings alone. A fork has to be maintained, so the rule is: keep the differe
 - Every new feature is off by default. With no new setting, the fork answers every URL like upstream
   `v1.3.0`.
 
-Related files: [baseline.md](baseline.md) (test counts), [memory.md](memory.md) (memory work, not
-measured yet), [safe-areas.md](safe-areas.md) (backdrop safe areas), `scripts/louk/README.md` (load
+Related files: [baseline.md](baseline.md) (test counts), [memory.md](memory.md) (memory: what was
+measured and decided), [safe-areas.md](safe-areas.md) (backdrop safe areas), `scripts/louk/README.md` (load
 harness).
 
 ## What it adds today
 
-Two settings, the title dashboard (backend and admin pages), a load harness and some documentation.
+Two settings, a load harness (with the memory measurements it produced) and some documentation.
 
 | Feature | What it does | How to turn it on | Default |
 | --- | --- | --- | --- |
@@ -34,7 +34,7 @@ Two settings, the title dashboard (backend and admin pages), a load harness and 
 | `RATINGS_DISABLED` | For dev and test only. No rating lookups at all, no badges, and the server starts without any rating provider. It guarantees a local instance or a load test can never call MDBList or OMDb. | `RATINGS_DISABLED=true`. A typo stops the server at startup instead of silently spending quota. | Off. **Never set it in production.** |
 | `LOUK_HTTP_ETAG` (speed) | Image responses get an `ETag`, and a client that already has the image gets a `304` with no body instead of the whole picture again. AIOMetadata's art proxy already passes `If-None-Match` and 304s through, so clients revalidate their hourly copies for a few hundred bytes instead of 68-475 KB. See `docs/louk/speed.md`. | On by default (it only adds a header; the image and every other header stay the same). `LOUK_HTTP_ETAG=false` turns it off. | On. |
 | `LOUK_RATINGS_SWR` (speed) | When a title's list of rating sources is older than its refresh interval (daily for new releases), upstream makes the request wait for MDBList (up to a few seconds) and then usually sends the old picture anyway. With this on, the cached picture goes out at once and the same request runs again in the background to fetch the ratings and redraw. Same number of rating calls. | `LOUK_RATINGS_SWR=true`. | Off (that one answer may show the previous ratings). |
-| Load harness | Scripts to start a local instance and fire a catalog-sized burst (150 titles x poster, backdrop, logo, plus 40 episode stills) while recording peak memory and latency. Meant to measure memory. | `scripts/louk/README.md`. | Not part of the image. |
+| Load harness | Scripts to start a local instance, warm its id caches, and fire a catalog-sized burst (150 titles x poster, backdrop, logo, plus 40 episode stills) while recording peak memory and latency. `run-variant.sh` does one variant in one command. Its results are in [memory.md](memory.md). | `scripts/louk/README.md`. | Not part of the image. |
 | Backdrop safe-area notes | Where the AIOStreams app crops and darkens backdrops, and which existing settings keep ratings visible. No code. | See "Backdrop safe areas" below. | Nothing changes by itself. |
 
 Both settings are documented in [configuration.md](../configuration.md#fork-only-loukdekkernl).
@@ -177,8 +177,18 @@ Unused uploads stay on disk (see the limits above).
 
 ### Production setting
 
-Production sets one thing: `BACKDROP_MAX_WIDTH=1920`. Louk approved the 1920 px cap on 2026-11-25.
-Louk's AIOMetadata URLs (`?imageSize=large`) do not change.
+Production sets three environment variables (decided 2026-11-25; the numbers are in [memory.md](memory.md)):
+
+```
+BACKDROP_MAX_WIDTH=1920
+MALLOC_ARENA_MAX=2
+MALLOC_MMAP_THRESHOLD_=131072
+```
+
+`BACKDROP_MAX_WIDTH` is the fork's setting (Louk approved the 1920 px cap on 2026-11-25; his AIOMetadata
+URLs, `?imageSize=large`, do not change). The two `MALLOC_*` lines are glibc settings, not app settings,
+and need no code. Reasons and the stacks-PR text are in
+[configuration.md](../configuration.md#recommended-production-environment).
 
 What happens at deploy:
 
@@ -199,6 +209,39 @@ What happens at deploy:
   the only log sign is a warning when the value is invalid (`BACKDROP_MAX_WIDTH ignored`), so no
   warning means the value was accepted. You can also open a `large` backdrop and check it is 1920 px
   wide, or look for `.mw1920` files in the cache.
+
+### Memory: what is measured and what production sets
+
+Measured on the dev box with the released `v1.3.0-louk.1` binary, under a worst-case catalog burst (490
+requests at once, every render cold, ratings off). Peak memory (VmHWM):
+
+| Setting | Peak | Share of upstream |
+| --- | --- | --- |
+| Upstream behaviour (none of the three) | 2299–2449 MB | 100% |
+| `BACKDROP_MAX_WIDTH=1920` only | 1617 MB | 68% |
+| The three above | **744–785 MB** | **31–33%** |
+| `MALLOC_ARENA_MAX=2` and `MALLOC_MMAP_THRESHOLD_=131072` on the unmodified upstream behaviour (no cap) | 917 MB | 39% |
+
+With the three, the memory after the burst falls back to about 290 MB, and p95 latency is about 11 s
+against about 19 s for upstream. The container limit stays at `1536m`. Nothing in the code changed for
+this: no allocator is built in (jemalloc and mimalloc did worse than tuned glibc), the in-flight render
+cache is not weighted by bytes (about 0 gain at 1920 px), and the number of requests holding a downloaded
+source while they wait for a render permit is not bounded (that is the next lever, see "Known limits").
+Not measured: the CPU cost of `MALLOC_MMAP_THRESHOLD_`, and a production-like single caller (that gets
+about 247 x 429 on a 490-request cold burst, with or without these settings).
+
+**Check that the variables reached the process** (after the deploy; the image's entrypoint starts the
+server through `su`, so this has to be looked at once). Run on the server, as Louk; it prints names and
+values of these three tuning variables only, never the rest of the environment:
+
+```sh
+docker exec openposterdb sh -c 'tr "\0" "\n" < /proc/$(pidof -s openposterdb)/environ | grep -E "^(MALLOC_ARENA_MAX|MALLOC_MMAP_THRESHOLD_|BACKDROP_MAX_WIDTH)="'
+```
+
+Expected: exactly three lines, `BACKDROP_MAX_WIDTH=1920`, `MALLOC_ARENA_MAX=2`,
+`MALLOC_MMAP_THRESHOLD_=131072`. Fewer lines means a variable did not reach the server. After a catalog
+burst, `dstats openposterdb` from the dev box should show well under `1536m`, and idle memory should settle
+around 300 MB (a fresh process starts near 40 MB).
 
 ## Divergence points in upstream files
 
@@ -305,9 +348,9 @@ carries the fork version. That keeps the most conflict-prone files out of the di
 | `web/src/louk/**` | Title dashboard frontend: `api.ts` (typed fetchers for the endpoints), `format.ts`, views (`LibraryView`, `TitleView`, `AliasRedirect`) and components (`TitleCard`, `ImageTile`, `SeasonList`, `SegmentedControl`). |
 | `web/src/__tests__/louk/**` | Unit tests of the above (api, Library, title page, the ImageListView link). |
 | `docs/louk/` | This file, `baseline.md`, `memory.md`, `safe-areas.md` and its `safe-areas/` evidence. |
-| `scripts/louk/` | Load harness (`burst.py`, `dev-instance.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 | `api/tests/louk_http_cache.rs` | Route tests for the ETag layer. |
 | `api/tests/louk_swr.rs` | Route tests for `LOUK_RATINGS_SWR`. |
+| `scripts/louk/` | Load harness (`burst.py` with its `--warmup` pass, `dev-instance.sh`, `run-variant.sh`, `results-table.py`, `fetch-titles.py`, `titles.json`, `selftest.sh`, README) and `sync-upstream.sh`. |
 
 ### Workflow differences
 
@@ -376,7 +419,8 @@ file is made again on request.
 
 1. Set the image line in `openposterdb/compose.yaml` back to `ghcr.io/pnrxa/openposterdb:latest` (or
    the pinned `v1.3.0`).
-2. Remove `BACKDROP_MAX_WIDTH` from the environment (upstream ignores it anyway).
+2. Remove `BACKDROP_MAX_WIDTH` from the environment (upstream ignores it anyway). The two `MALLOC_*`
+   lines can stay: they are glibc settings and help upstream's image too.
 3. Deploy.
 
 Why it is safe:
@@ -414,6 +458,11 @@ dashboard to turn on. The only per-key looks to set are the existing backdrop se
 
 ## Known limits and open items
 
+- **Next memory lever, not built.** If production still gets killed at 1536m after the three settings, bound how
+  many requests hold a downloaded source while they wait for a render permit (a separate semaphore of about
+  2 x `RENDER_CONCURRENCY`, not a move of the fetch under the render permit). Measured at -80 to -140 MB
+  (10-15%). It touches the fetch path of the four image kinds in upstream's `generate.rs`, so it adds
+  divergence and its latency must be re-measured. Details in [memory.md](memory.md).
 - **Rate limit.** Upstream limits image requests to a burst of 240, then 1 per 200 ms (5 a second),
   per API key and client address. In production AIOMetadata is the only caller, so one key behaves as
   one caller: a catalog that opens more than about 240 images at once can get some `429` answers even
