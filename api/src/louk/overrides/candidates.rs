@@ -45,7 +45,8 @@ pub struct TmdbImageFull {
 }
 
 impl TmdbImageFull {
-    fn as_upstream(&self) -> TmdbImage {
+    /// Upstream's `TmdbImage` of this image (for its `select_*` functions).
+    pub fn as_upstream(&self) -> TmdbImage {
         TmdbImage {
             file_path: self.file_path.clone(),
             iso_639_1: self.iso_639_1.clone(),
