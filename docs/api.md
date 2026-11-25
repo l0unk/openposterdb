@@ -148,6 +148,8 @@ Title summary: `{media_type, tmdb_id, name, year, imdb_id, poster_thumb_url, las
 
 In the detail: `aliases` = `[{id_type, id_value, season, episode, last_requested}]` (`season`/`episode` set for episode ids). `images` = every cached render of the title under any of its ids, newest first: `[{kind, id_type, cache_value, created_at, updated_at, admin_image_url}]`, where `admin_image_url` is the existing admin image endpoint for that row (needs the admin token). `seasons` (shows only) = `[{season, episodes: [{episode, name, air_date, still_thumb_url, cached: [image]}]}]` for the seasons that have a requested episode; episode names come from TMDB `/tv/{id}/season/{n}` on first view and are kept 7 days. `still_thumb_url` is a TMDB `w300` URL.
 
+`episodes_pending` (shows only, added later; `true`/`false`): a show page fetches stale season episode names from TMDB for at most 3 s and at most 10 seasons, seasons with cached stills first; the rest are fetched in the background and the response says `episodes_pending: true` (those seasons show what is stored, possibly no names yet). Open the page again a few seconds later to get them. The key is absent for movies.
+
 ## Per-title overrides (fork-only, admin)
 
 Swap the art of one title for another TMDB or fanart.tv image or an uploaded file, and optionally

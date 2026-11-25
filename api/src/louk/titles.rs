@@ -50,7 +50,11 @@ const DETAILS_RETRY_SECS: i64 = 86_400;
 pub const EPISODES_TTL_SECS: i64 = 7 * 86_400;
 /// Longer id values are ignored by the hooks (real ids are far shorter).
 const MAX_ID_VALUE_LEN: usize = 200;
-const FLUSH_CHUNK: usize = 500;
+/// Items per flush transaction: small, so the write lock is held briefly
+/// and image serving (which writes `image_meta`) never waits long.
+const FLUSH_CHUNK: usize = 100;
+/// Retries of a failed flush chunk (busy database), with these pauses.
+const FLUSH_RETRY_PAUSES_MS: [u64; 2] = [100, 400];
 
 pub fn now_secs() -> i64 {
     chrono::Utc::now().timestamp()
@@ -213,30 +217,96 @@ fn drain<V>(map: &DashMap<(String, String), V>) -> Vec<((String, String), V)> {
 }
 
 /// Write everything the hooks collected since the last flush.
+///
+/// Chunks of [`FLUSH_CHUNK`] items, each in its own short transaction,
+/// retried on failure (busy database) with a short backoff. A chunk that
+/// still fails is put back into the pending maps together with everything
+/// not written yet (entries noted meanwhile win), so a failed flush loses
+/// nothing; the next flush retries. Returns the first error.
 pub async fn flush_once(state: &AppState) -> Result<(), AppError> {
     let resolved = drain(&state.louk.resolved);
     let touches = drain(&state.louk.touches);
     if resolved.is_empty() && touches.is_empty() {
         return Ok(());
     }
-    for chunk in resolved.chunks(FLUSH_CHUNK) {
-        let txn = state.db.begin().await?;
-        for ((id_type, id_value), row) in chunk {
-            upsert_alias(&txn, id_type, id_value, row).await?;
+    let mut first_err: Option<AppError> = None;
+    let mut wrote_resolved = false;
+    let chunks: Vec<&[((String, String), AliasRow)]> = resolved.chunks(FLUSH_CHUNK).collect();
+    for (i, &chunk) in chunks.iter().enumerate() {
+        if let Err(e) = with_retry(|| write_resolved_chunk(state, chunk)).await {
+            // Put back this chunk and the rest; newer notes win.
+            for (k, row) in chunks[i..].iter().flat_map(|c| c.iter()) {
+                state
+                    .louk
+                    .resolved
+                    .entry(k.clone())
+                    .or_insert_with(|| row.clone());
+            }
+            first_err = Some(e.into());
+            break;
         }
-        txn.commit().await?;
+        wrote_resolved = true;
     }
-    for chunk in touches.chunks(FLUSH_CHUNK) {
-        let txn = state.db.begin().await?;
-        for ((id_type, id_value), at) in chunk {
-            apply_touch(&txn, id_type, id_value, *at).await?;
+    let chunks: Vec<&[((String, String), i64)]> = touches.chunks(FLUSH_CHUNK).collect();
+    for (i, &chunk) in chunks.iter().enumerate() {
+        if let Err(e) = with_retry(|| write_touch_chunk(state, chunk)).await {
+            for (k, at) in chunks[i..].iter().flat_map(|c| c.iter()) {
+                state
+                    .louk
+                    .touches
+                    .entry(k.clone())
+                    .and_modify(|v| *v = (*v).max(*at))
+                    .or_insert(*at);
+            }
+            first_err.get_or_insert(e.into());
+            break;
         }
-        txn.commit().await?;
     }
-    if !resolved.is_empty() {
+    if wrote_resolved {
         state.louk.title_queue.notify_one();
     }
-    Ok(())
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
+}
+
+async fn with_retry<F, Fut>(mut attempt: F) -> Result<(), DbErr>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<(), DbErr>>,
+{
+    let mut result = attempt().await;
+    for pause in FLUSH_RETRY_PAUSES_MS {
+        if result.is_ok() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(pause)).await;
+        result = attempt().await;
+    }
+    result
+}
+
+async fn write_resolved_chunk(
+    state: &AppState,
+    chunk: &[((String, String), AliasRow)],
+) -> Result<(), DbErr> {
+    let txn = state.db.begin().await?;
+    for ((id_type, id_value), row) in chunk {
+        upsert_alias(&txn, id_type, id_value, row).await?;
+    }
+    txn.commit().await
+}
+
+async fn write_touch_chunk(
+    state: &AppState,
+    chunk: &[((String, String), i64)],
+) -> Result<(), DbErr> {
+    let txn = state.db.begin().await?;
+    for ((id_type, id_value), at) in chunk {
+        apply_touch(&txn, id_type, id_value, *at).await?;
+    }
+    txn.commit().await
 }
 
 /// Upsert the title row and the alias row for one resolution.
@@ -299,18 +369,10 @@ async fn apply_touch(
     id_value: &str,
     at: i64,
 ) -> Result<(), DbErr> {
-    let Some(alias) = db
-        .query_one(stmt(
-            "SELECT media_type, tmdb_id FROM louk_title_aliases WHERE id_type = ? AND id_value = ?",
-            vec![id_type.into(), id_value.into()],
-        ))
-        .await?
-    else {
-        // Not indexed yet: the slow path (note_resolved) or the backfill adds it.
-        return Ok(());
-    };
-    let media_type: String = alias.try_get("", "media_type")?;
-    let tmdb_id: i64 = alias.try_get("", "tmdb_id")?;
+    // Write first (no SELECT before the first write): a deferred transaction
+    // that read first could fail with SQLITE_BUSY_SNAPSHOT when another
+    // writer committed in between. An id that is not indexed yet matches no
+    // row; the slow path (note_resolved) or the backfill adds it.
     db.execute(stmt(
         "UPDATE louk_title_aliases SET last_requested = MAX(last_requested, ?)
          WHERE id_type = ? AND id_value = ?",
@@ -319,8 +381,9 @@ async fn apply_touch(
     .await?;
     db.execute(stmt(
         "UPDATE louk_titles SET last_requested = MAX(last_requested, ?)
-         WHERE media_type = ? AND tmdb_id = ?",
-        vec![at.into(), media_type.into(), tmdb_id.into()],
+         WHERE (media_type, tmdb_id) IN
+               (SELECT media_type, tmdb_id FROM louk_title_aliases WHERE id_type = ? AND id_value = ?)",
+        vec![at.into(), id_type.into(), id_value.into()],
     ))
     .await?;
     Ok(())
@@ -892,6 +955,17 @@ fn episode_from_row(r: &QueryResult) -> Result<EpisodeRow, DbErr> {
     })
 }
 
+/// True when the season's episode names are stored and younger than
+/// [`EPISODES_TTL_SECS`] (no TMDB call needed).
+pub async fn season_is_fresh(
+    db: &impl ConnectionTrait,
+    show: i64,
+    season: i64,
+) -> Result<bool, AppError> {
+    let (stored, oldest) = stored_episodes(db, show, season).await?;
+    Ok(!stored.is_empty() && oldest > now_secs() - EPISODES_TTL_SECS)
+}
+
 /// Episodes of one season: from `louk_episodes` when fetched within the last
 /// 7 days, otherwise from TMDB `/tv/{id}/season/{n}` (paced) and stored. A
 /// failed fetch falls back to whatever is stored (possibly nothing).
@@ -966,6 +1040,15 @@ mod tests {
         assert_eq!(parse_cache_key_prefix("imdb/@x"), None);
         assert_eq!(parse_cache_key_prefix("imdb/tt1:logo:x"), None);
         assert_eq!(parse_cache_key_prefix("no-slash"), None);
+        // The fork's backdrop-cap token sits inside the suffix after `@`.
+        assert_eq!(
+            parse_cache_key_prefix("tmdb/movie-603_b_t@ir.ptr.sh.li.dv.bl.shr.bgd.mw1920.zl"),
+            Some(("tmdb".into(), "movie-603".into()))
+        );
+        assert_eq!(
+            parse_cache_key_prefix("imdb/tt0133093_b_f@.mw1280.zvl"),
+            Some(("imdb".into(), "tt0133093".into()))
+        );
     }
 
     fn resolved(media_type: MediaType) -> ResolvedId {

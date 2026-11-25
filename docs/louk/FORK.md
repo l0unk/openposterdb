@@ -56,6 +56,11 @@ use it.
   days). One call at a time, at least 250 ms apart. Never OMDb, MDBList or Trakt.
 - Always on; it changes no image, cache key or response. Tables: `louk_titles`,
   `louk_title_aliases`, `louk_episodes`.
+- The flush writes in transactions of 100 items, write-first (no read before the first write, so
+  a busy WAL cannot fail it with `SQLITE_BUSY_SNAPSHOT`), retries a failed chunk twice (100 ms,
+  400 ms) and puts anything it could not write back into the pending maps. A show page spends at
+  most 3 s (10 seasons) on TMDB episode names; the rest load in the background
+  (`episodes_pending: true`).
 
 ### Per-title overrides
 

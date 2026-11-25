@@ -41,6 +41,9 @@ pub struct LoukState {
     pub tmdb_gate: tokio::sync::Mutex<Option<Instant>>,
     /// Hook entries dropped because a pending map was full.
     pub dropped: AtomicU64,
+    /// Shows whose season episode names are being fetched in the background
+    /// (a title page ran out of its fetch budget).
+    pub season_jobs: DashMap<i64, ()>,
     /// Per-title art overrides (in-memory mirror of `louk_overrides`).
     pub overrides: crate::louk::overrides::store::OverrideStore,
 }
@@ -53,6 +56,7 @@ impl LoukState {
             title_queue: tokio::sync::Notify::new(),
             tmdb_gate: tokio::sync::Mutex::new(None),
             dropped: AtomicU64::new(0),
+            season_jobs: DashMap::new(),
             overrides: crate::louk::overrides::store::OverrideStore::new(),
         }
     }

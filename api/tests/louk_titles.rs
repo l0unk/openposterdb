@@ -680,6 +680,7 @@ async fn upstream_schema_opens_fork_db() {
         "INSERT INTO louk_titles (media_type, tmdb_id) VALUES ('tv', 2)",
         "INSERT INTO louk_title_aliases (id_type, id_value, media_type, tmdb_id) VALUES ('tmdb', 'series-2', 'tv', 2)",
         "INSERT INTO louk_episodes (show_tmdb_id, season, episode) VALUES (2, 1, 2)",
+        "INSERT INTO louk_overrides (media_type, tmdb_id, kind, source) VALUES ('tv', 2, 'logo', 'auto')",
     ] {
         db.execute_unprepared(sql).await.expect(sql);
     }
@@ -696,4 +697,237 @@ async fn upstream_schema_opens_fork_db() {
         .await
         .expect("image_meta write");
     assert_eq!(db::count_image_meta(&db).await.unwrap(), 1);
+}
+
+// --- review follow-ups: hook wiring, backfill parsing, lossless flush --------
+
+fn no_art(
+    media_type: MediaType,
+    tmdb_id: u64,
+    imdb: &str,
+    episode: Option<EpisodeInfo>,
+) -> ResolvedId {
+    ResolvedId {
+        imdb_id: Some(imdb.to_owned()),
+        tmdb_id,
+        tvdb_id: None,
+        media_type,
+        poster_path: None,
+        release_date: None,
+        episode,
+    }
+}
+
+async fn api_key(app: &axum::Router, token: &str) -> String {
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/keys")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(serde_json::json!({"name": "hooks"}).to_string()))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice::<serde_json::Value>(&body).unwrap()["key"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+fn pending(map: &dashmap::DashMap<(String, String), impl Sized>, t: &str, v: &str) -> bool {
+    map.contains_key(&(t.to_owned(), v.to_owned()))
+}
+
+/// The `serve.rs` hooks fire on the real image routes (deleting one fails
+/// this test). No network: resolutions come from `id_cache`, ratings are
+/// off, and the titles have no TMDB art, so each request stops before any
+/// TMDB fetch.
+#[tokio::test]
+async fn serve_hooks_fire_on_image_routes() {
+    let (app, state) = common::setup_test_app_with_options(common::TestAppOptions {
+        disable_fanart: true,
+        louk: openposterdb_api::louk::config::LoukConfig {
+            ratings_disabled: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+    .await;
+    let token = common::setup_admin(&app).await;
+    let key = api_key(&app, &token).await;
+    state
+        .id_cache
+        .insert(
+            "imdb/tt9900700".into(),
+            no_art(MediaType::Movie, 9_900_700, "tt9900700", None),
+        )
+        .await;
+    let ep = EpisodeInfo {
+        show_tmdb_id: 9_900_702,
+        season_number: 1,
+        episode_number: 2,
+        still_path: None,
+    };
+    state
+        .id_cache
+        .insert(
+            "imdb/episode-tt9900702-S1E2".into(),
+            no_art(MediaType::Episode, 9_900_799, "tt9900799", Some(ep)),
+        )
+        .await;
+
+    for uri in [
+        format!("/{key}/imdb/poster-default/tt9900700.jpg"),
+        format!("/{key}/imdb/episode-default/episode-tt9900702-S1E2.jpg"),
+        // Not a valid tmdb id: touched, then rejected before any TMDB call.
+        format!("/{key}/tmdb/logo-default/movie-x9900703.png"),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_ne!(res.status(), StatusCode::UNAUTHORIZED, "{uri}");
+    }
+
+    // touch (handle_inner, handle_episode_inner, handle_logo_backdrop_inner)
+    assert!(pending(&state.louk.touches, "imdb", "tt9900700"));
+    assert!(pending(
+        &state.louk.touches,
+        "imdb",
+        "episode-tt9900702-S1E2"
+    ));
+    assert!(pending(&state.louk.touches, "tmdb", "movie-x9900703"));
+    // note_resolved (resolve_with_ratings): the requested id and its cross ids
+    assert!(pending(&state.louk.resolved, "imdb", "tt9900700"));
+    assert!(pending(&state.louk.resolved, "tmdb", "movie-9900700"));
+    assert!(pending(
+        &state.louk.resolved,
+        "imdb",
+        "episode-tt9900702-S1E2"
+    ));
+
+    titles::flush_once(&state).await.unwrap();
+    assert_eq!(
+        count(&state, "SELECT COUNT(*) AS v FROM louk_title_aliases WHERE id_value IN ('tt9900700', 'movie-9900700')").await,
+        2
+    );
+    assert_eq!(
+        count(
+            &state,
+            "SELECT COUNT(*) AS v FROM louk_title_aliases
+             WHERE id_value = 'episode-tt9900702-S1E2' AND media_type = 'tv' AND tmdb_id = 9900702 AND season = 1 AND episode = 2"
+        )
+        .await,
+        1
+    );
+}
+
+/// The backfill parses cached keys, including the fork's `.mw<N>` backdrop
+/// token, resolves them from `id_cache` and records the aliases.
+#[tokio::test]
+async fn backfill_indexes_cached_keys_with_mw_token() {
+    let (_app, state) = common::setup_test_app().await;
+    state
+        .id_cache
+        .insert(
+            "imdb/tt9900800".into(),
+            movie("tt9900800", 9_900_800, "2001-01-01"),
+        )
+        .await;
+    state
+        .id_cache
+        .insert(
+            "tmdb/movie-9900801".into(),
+            movie("tt9900801", 9_900_801, "2002-01-01"),
+        )
+        .await;
+    cache::upsert_meta_db(&state.db, "imdb/tt9900800@.pbc.zm", None, ImageType::Poster)
+        .await
+        .unwrap();
+    cache::upsert_meta_db(
+        &state.db,
+        "tmdb/movie-9900801_b_t@ir.ptr.sh.li.dv.bl.shr.bgd.mw1920.zl",
+        None,
+        ImageType::Backdrop,
+    )
+    .await
+    .unwrap();
+
+    let mut cursor = String::new();
+    let mut failed = std::collections::HashSet::new();
+    let n = titles::backfill_once(&state, &mut cursor, &mut failed, 50)
+        .await
+        .unwrap();
+    assert_eq!(n, 2);
+    assert!(failed.is_empty(), "{failed:?}");
+    for (t, v, id) in [
+        ("imdb", "tt9900800", 9_900_800),
+        ("tmdb", "movie-9900800", 9_900_800),
+        ("tmdb", "movie-9900801", 9_900_801),
+    ] {
+        assert_eq!(
+            count(
+                &state,
+                &format!("SELECT COUNT(*) AS v FROM louk_title_aliases WHERE id_type = '{t}' AND id_value = '{v}' AND tmdb_id = {id}")
+            )
+            .await,
+            1,
+            "{t}/{v}"
+        );
+    }
+    // A second round finds nothing new.
+    assert_eq!(
+        titles::backfill_once(&state, &mut cursor, &mut failed, 50)
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+/// A flush that cannot write keeps every pending entry for the next flush.
+#[tokio::test]
+async fn failed_flush_loses_nothing() {
+    let (_app, state) = common::setup_test_app().await;
+    titles::note_resolved(
+        &state,
+        "imdb",
+        "tt9900900",
+        &movie("tt9900900", 9_900_900, "2003-01-01"),
+    );
+    titles::touch(&state, "imdb", "tt9900900");
+    let before = (state.louk.resolved.len(), state.louk.touches.len());
+
+    exec(
+        &state,
+        "ALTER TABLE louk_title_aliases RENAME TO louk_title_aliases_away",
+    )
+    .await;
+    assert!(titles::flush_once(&state).await.is_err());
+    assert_eq!(
+        (state.louk.resolved.len(), state.louk.touches.len()),
+        before,
+        "entries put back"
+    );
+
+    exec(
+        &state,
+        "ALTER TABLE louk_title_aliases_away RENAME TO louk_title_aliases",
+    )
+    .await;
+    titles::flush_once(&state).await.unwrap();
+    assert!(state.louk.resolved.is_empty() && state.louk.touches.is_empty());
+    assert_eq!(
+        count(&state, "SELECT COUNT(*) AS v FROM louk_title_aliases WHERE id_value IN ('tt9900900', 'movie-9900900')").await,
+        2
+    );
+    assert!(
+        count(
+            &state,
+            "SELECT last_requested AS v FROM louk_title_aliases WHERE id_value = 'tt9900900'"
+        )
+        .await
+            > 0
+    );
 }

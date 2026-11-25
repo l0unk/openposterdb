@@ -22,9 +22,11 @@ pub const MAX_PER_PAGE: u64 = 200;
 const MAX_QUERY_LEN: usize = 200;
 /// Most image rows one title page lists.
 const MAX_DETAIL_IMAGES: i64 = 5_000;
-/// Seasons whose episode names may be fetched from TMDB for one page view;
-/// further seasons show what is stored.
-const MAX_SEASONS_FETCHED: usize = 40;
+/// Seasons whose episode names may be fetched from TMDB inside one page
+/// view; the rest are fetched in the background (`episodes_pending`).
+const MAX_SEASONS_FETCHED: usize = 10;
+/// Time one page view may spend on TMDB season fetches.
+const SEASON_FETCH_BUDGET: std::time::Duration = std::time::Duration::from_secs(3);
 
 const TMDB_POSTER_THUMB: &str = "https://image.tmdb.org/t/p/w185";
 const TMDB_STILL_THUMB: &str = "https://image.tmdb.org/t/p/w300";
@@ -117,6 +119,10 @@ pub struct TitleDetail {
     pub images: Vec<ImageOut>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seasons: Option<Vec<SeasonOut>>,
+    /// Shows only: true when some seasons' episode names are still being
+    /// fetched in the background (open the page again in a few seconds).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub episodes_pending: Option<bool>,
 }
 
 #[derive(Serialize, Debug)]
@@ -461,10 +467,11 @@ pub async fn title_detail(
         images.push(img);
     }
 
-    let seasons = if media_type == "tv" {
-        Some(build_seasons(&state, tmdb_id, &alias_rows, cached_eps).await?)
+    let (seasons, episodes_pending) = if media_type == "tv" {
+        let (seasons, pending) = build_seasons(&state, tmdb_id, &alias_rows, cached_eps).await?;
+        (Some(seasons), Some(pending))
     } else {
-        None
+        (None, None)
     };
 
     let aliases = alias_rows
@@ -486,18 +493,51 @@ pub async fn title_detail(
         aliases,
         images,
         seasons,
+        episodes_pending,
     }))
+}
+
+/// Order in which a title page fetches stale seasons: seasons with cached
+/// episode stills first, then the others, each ascending.
+pub fn season_fetch_order(seasons: &BTreeSet<i64>, with_images: &BTreeSet<i64>) -> Vec<i64> {
+    let mut out: Vec<i64> = seasons
+        .iter()
+        .copied()
+        .filter(|s| with_images.contains(s))
+        .collect();
+    out.extend(seasons.iter().copied().filter(|s| !with_images.contains(s)));
+    out
+}
+
+/// Fetch the given seasons' episode names in the background (paced like
+/// every fork TMDB call), at most one job per show at a time.
+fn spawn_season_fetch(state: &AppState, show: i64, seasons: Vec<i64>) {
+    if state.louk.season_jobs.insert(show, ()).is_some() {
+        return;
+    }
+    let state = state.clone();
+    tokio::spawn(async move {
+        for season in seasons {
+            if let Err(e) = titles::season_episodes(&state, show, season).await {
+                tracing::debug!(error = %e, show, season, "louk: background season fetch failed");
+            }
+        }
+        state.louk.season_jobs.remove(&show);
+    });
 }
 
 /// Seasons of a show that were requested (an episode alias exists) or whose
 /// episode names are already stored. Episode names come from `louk_episodes`
-/// (fetched from TMDB when missing or older than 7 days).
+/// (fetched from TMDB when missing or older than 7 days). Stale seasons are
+/// fetched within [`SEASON_FETCH_BUDGET`] (at most [`MAX_SEASONS_FETCHED`],
+/// seasons with cached stills first); the rest continue in the background
+/// and the second value is true.
 async fn build_seasons(
     state: &AppState,
     show: i64,
     aliases: &[titles::AliasInfo],
     mut cached_eps: HashMap<(i64, i64), Vec<ImageOut>>,
-) -> Result<Vec<SeasonOut>, AppError> {
+) -> Result<(Vec<SeasonOut>, bool), AppError> {
     let mut seasons: BTreeSet<i64> = aliases.iter().filter_map(|a| a.season).collect();
     let stored = state
         .db
@@ -517,12 +557,41 @@ async fn build_seasons(
         .collect();
     requested.extend(cached_eps.keys().copied());
 
+    let with_images: BTreeSet<i64> = cached_eps.keys().map(|(s, _)| *s).collect();
+    let deadline = std::time::Instant::now() + SEASON_FETCH_BUDGET;
+    let mut fetched: HashMap<i64, Vec<titles::EpisodeRow>> = HashMap::new();
+    let mut pending: Vec<i64> = Vec::new();
+    let mut tried = 0;
+    for season in season_fetch_order(&seasons, &with_images) {
+        if titles::season_is_fresh(&state.db, show, season).await? {
+            continue;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if tried >= MAX_SEASONS_FETCHED || left.is_zero() {
+            pending.push(season);
+            continue;
+        }
+        tried += 1;
+        match tokio::time::timeout(left, titles::season_episodes(state, show, season)).await {
+            Ok(Ok(rows)) => {
+                fetched.insert(season, rows);
+            }
+            Ok(Err(e)) => {
+                tracing::debug!(error = %e, show, season, "louk: season episodes unavailable");
+            }
+            Err(_) => pending.push(season),
+        }
+    }
+    let episodes_pending = !pending.is_empty();
+    if episodes_pending {
+        spawn_season_fetch(state, show, pending);
+    }
+
     let mut out = Vec::with_capacity(seasons.len());
-    for (i, season) in seasons.into_iter().enumerate() {
-        let known = if i < MAX_SEASONS_FETCHED {
-            titles::season_episodes(state, show, season).await?
-        } else {
-            titles::stored_episodes(&state.db, show, season).await?.0
+    for season in seasons {
+        let known = match fetched.remove(&season) {
+            Some(rows) => rows,
+            None => titles::stored_episodes(&state.db, show, season).await?.0,
         };
         let mut episodes: Vec<EpisodeOut> = known
             .into_iter()
@@ -549,7 +618,7 @@ async fn build_seasons(
         episodes.sort_by_key(|e| e.episode);
         out.push(SeasonOut { season, episodes });
     }
-    Ok(out)
+    Ok((out, episodes_pending))
 }
 
 // ---------------------------------------------------------------------------
@@ -749,6 +818,17 @@ pub async fn refetch_title(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn season_fetch_order_puts_seasons_with_stills_first() {
+        let seasons: BTreeSet<i64> = [0, 1, 2, 3, 4].into_iter().collect();
+        let with_images: BTreeSet<i64> = [3, 1].into_iter().collect();
+        assert_eq!(season_fetch_order(&seasons, &with_images), [1, 3, 0, 2, 4]);
+        assert_eq!(
+            season_fetch_order(&seasons, &BTreeSet::new()),
+            [0, 1, 2, 3, 4]
+        );
+    }
 
     #[test]
     fn title_path_parsing() {
