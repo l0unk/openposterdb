@@ -217,3 +217,58 @@ async fn global_and_per_key_settings_store_fork_looks() {
         .unwrap();
     assert!(res.status().is_client_error(), "got {}", res.status());
 }
+
+// --- ?art= (real artwork in admin previews, `louk::preview_art`) ---
+
+#[tokio::test]
+async fn preview_without_art_is_unchanged_by_season_and_episode() {
+    let (app, _state) = common::setup_test_app().await;
+    let token = common::setup_admin(&app).await;
+    for kind in ["poster", "backdrop", "logo", "episode"] {
+        let (s1, plain) = get_bytes(&app, &format!("/api/admin/preview/{kind}?badge_background=s"), &token).await;
+        let (s2, with) = get_bytes(&app, &format!("/api/admin/preview/{kind}?badge_background=s&season=1&episode=2&art="), &token).await;
+        assert_eq!((s1, s2), (StatusCode::OK, StatusCode::OK), "{kind}");
+        assert_eq!(plain, with, "{kind}: no art means the usual sample image");
+    }
+}
+
+#[tokio::test]
+async fn preview_rejects_bad_art() {
+    let (app, _state) = common::setup_test_app().await;
+    let token = common::setup_admin(&app).await;
+    for uri in [
+        "/api/admin/preview/poster?art=film-603",
+        "/api/admin/preview/poster?art=movie-abc",
+        "/api/admin/preview/backdrop?art=movie-0",
+        "/api/admin/preview/episode?art=series-1399",
+        "/api/admin/preview/episode?art=movie-603&season=1&episode=1",
+        "/api/admin/preview/poster?art=movie-603&season=x",
+    ] {
+        let (status, body) = get_bytes(&app, uri, &token).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{uri}");
+        let json: Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["error"].is_string(), "{uri}: JSON error");
+    }
+}
+
+#[tokio::test]
+async fn self_service_preview_refuses_art() {
+    let (app, _state) = common::setup_test_app().await;
+    let token = common::setup_api_key_session(&app).await;
+    let (status, _) = get_bytes(&app, "/api/key/me/preview/poster?badge_background=s", &token).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = get_bytes(&app, "/api/key/me/preview/poster?art=movie-603", &token).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn preview_art_failure_is_a_json_error_not_a_panic() {
+    // The test app's TMDB key is a dummy, so TMDB refuses (or is unreachable):
+    // the preview answers 404/502 with a JSON error.
+    let (app, _state) = common::setup_test_app().await;
+    let token = common::setup_admin(&app).await;
+    let (status, body) = get_bytes(&app, "/api/admin/preview/poster?art=movie-603&badge_background=a", &token).await;
+    assert!(status == StatusCode::BAD_GATEWAY || status == StatusCode::NOT_FOUND, "got {status}");
+    let json: Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["error"].as_str().unwrap().contains("TMDB"));
+}

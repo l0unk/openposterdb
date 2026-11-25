@@ -179,6 +179,7 @@ fn parse_preview_image_size(
 pub async fn preview_poster(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ImageQuery>,
+    louk_art: crate::louk::preview_art::PreviewArt, // louk-fork: ?art= real artwork (admin previews)
 ) -> Result<Response, AppError> {
     let image_size = parse_preview_image_size(&query.image_size, cache::ImageType::Poster)?;
     let badge_size = query.badge_size.unwrap_or(db::default_badge_size());
@@ -206,6 +207,7 @@ pub async fn preview_poster(
     preview_settings.poster_badge_split = split;
     preview_settings.poster_fit = poster_fit;
     let suffix = serve::settings_cache_suffix_with_ratings(&preview_settings, cache::ImageType::Poster, image_size, &ratings_suffix);
+    let (louk_art, suffix) = crate::louk::preview_art::keyed(louk_art, cache::ImageType::Poster, suffix)?; // louk-fork:
     let cache_key = format!("preview:{suffix}");
     let cache_path = cache::preview_path(&state.config.cache_dir, cache::ImageType::Poster, &suffix, "jpg")?;
 
@@ -225,11 +227,11 @@ pub async fn preview_poster(
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let poster_png: &'static Vec<u8> = &SAMPLE_POSTER_PNG;
+    let poster_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Poster, image_size, SAMPLE_POSTER_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_poster_sync(poster_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, split, poster_fit)
+        generate::render_poster_sync(&poster_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, split, poster_fit)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
@@ -244,6 +246,7 @@ pub async fn preview_poster(
 pub async fn preview_logo(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ImageQuery>,
+    louk_art: crate::louk::preview_art::PreviewArt, // louk-fork: ?art= real artwork (admin previews)
 ) -> Result<Response, AppError> {
     let image_size = parse_preview_image_size(&query.image_size, cache::ImageType::Logo)?;
     let badge_size = query.badge_size.unwrap_or(db::default_badge_size());
@@ -264,6 +267,7 @@ pub async fn preview_logo(
     let ratings_suffix = ratings::ratings_cache_suffix(ratings_order, ratings_exclude, ratings_limit);
     let preview_settings = preview_render_settings(cache::ImageType::Logo, badge_style, label_style, badge_size, BadgePosition::BottomCenter, BadgeDirection::Horizontal, badge_appearance, ratings_limit, ratings_order, ratings_exclude);
     let suffix = serve::settings_cache_suffix_with_ratings(&preview_settings, cache::ImageType::Logo, image_size, &ratings_suffix);
+    let (louk_art, suffix) = crate::louk::preview_art::keyed(louk_art, cache::ImageType::Logo, suffix)?; // louk-fork:
     let cache_key = format!("preview-logo:{suffix}");
     let cache_path = cache::preview_path(&state.config.cache_dir, cache::ImageType::Logo, &suffix, "png")?;
 
@@ -280,11 +284,11 @@ pub async fn preview_logo(
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let logo_png: &'static Vec<u8> = &SAMPLE_LOGO_PNG;
+    let logo_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Logo, image_size, SAMPLE_LOGO_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_logo_sync(logo_png, &badges, &font, badge_style, label_style, badge_appearance, target_width, badge_scale)
+        generate::render_logo_sync(&logo_png, &badges, &font, badge_style, label_style, badge_appearance, target_width, badge_scale)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
@@ -299,6 +303,7 @@ pub async fn preview_logo(
 pub async fn preview_backdrop(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ImageQuery>,
+    louk_art: crate::louk::preview_art::PreviewArt, // louk-fork: ?art= real artwork (admin previews)
 ) -> Result<Response, AppError> {
     let image_size = parse_preview_image_size(&query.image_size, cache::ImageType::Backdrop)?;
     let badge_size = query.badge_size.unwrap_or(db::default_badge_size());
@@ -325,6 +330,7 @@ pub async fn preview_backdrop(
     preview_settings.backdrop_edge_inset_y = edge_inset_y;
     let suffix = serve::settings_cache_suffix_with_ratings(&preview_settings, cache::ImageType::Backdrop, image_size, &ratings_suffix);
     let suffix = crate::louk::backdrop_cap::backdrop_suffix(&state.config.louk, cache::ImageType::Backdrop, image_size, suffix); // louk-fork:
+    let (louk_art, suffix) = crate::louk::preview_art::keyed(louk_art, cache::ImageType::Backdrop, suffix)?; // louk-fork:
     let cache_key = format!("preview-backdrop:{suffix}");
     let cache_path = cache::preview_path(&state.config.cache_dir, cache::ImageType::Backdrop, &suffix, "jpg")?;
 
@@ -341,12 +347,12 @@ pub async fn preview_backdrop(
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let backdrop_png: &'static Vec<u8> = &SAMPLE_BACKDROP_PNG;
+    let backdrop_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Backdrop, image_size, SAMPLE_BACKDROP_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_backdrop_sync(backdrop_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, edge_inset_x, edge_inset_y)
+        generate::render_backdrop_sync(&backdrop_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, edge_inset_x, edge_inset_y)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;
@@ -382,6 +388,7 @@ static SAMPLE_EPISODE_PNG: LazyLock<Vec<u8>> = LazyLock::new(|| {
 pub async fn preview_episode(
     State(state): State<Arc<AppState>>,
     Query(query): Query<ImageQuery>,
+    louk_art: crate::louk::preview_art::PreviewArt, // louk-fork: ?art= real artwork (admin previews)
 ) -> Result<Response, AppError> {
     let image_size = parse_preview_image_size(&query.image_size, cache::ImageType::Episode)?;
     let badge_size = query.badge_size.unwrap_or(db::BadgeSize::Large);
@@ -406,6 +413,7 @@ pub async fn preview_episode(
     let mut preview_settings = preview_render_settings(cache::ImageType::Episode, badge_style, label_style, badge_size, position, badge_direction, badge_appearance, ratings_limit, ratings_order, ratings_exclude);
     preview_settings.episode_blur = blur;
     let suffix = serve::settings_cache_suffix_with_ratings(&preview_settings, cache::ImageType::Episode, image_size, &ratings_suffix);
+    let (louk_art, suffix) = crate::louk::preview_art::keyed(louk_art, cache::ImageType::Episode, suffix)?; // louk-fork:
     let cache_key = format!("preview-episode:{suffix}");
     let cache_path = cache::preview_path(&state.config.cache_dir, cache::ImageType::Episode, &suffix, "jpg")?;
 
@@ -422,12 +430,12 @@ pub async fn preview_episode(
     let badges = crate::louk::badge_looks::preview_samples(badge_appearance.background).unwrap_or_else(sample_badges); // louk-fork: varied scores for fork looks
     let badges = ratings::apply_rating_preferences(badges, ratings_order, ratings_exclude, ratings_limit);
 
-    let episode_png: &'static Vec<u8> = &SAMPLE_EPISODE_PNG;
+    let episode_png = match crate::louk::preview_art::source(&state, louk_art.as_ref(), cache::ImageType::Episode, image_size, SAMPLE_EPISODE_PNG.as_slice()).await { Ok(b) => b, Err(r) => return Ok(r) }; // louk-fork:
     let font = state.font.clone();
     let quality = state.config.image_quality;
 
     let buf = tokio::task::spawn_blocking(move || {
-        generate::render_episode_sync(episode_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, blur)
+        generate::render_episode_sync(&episode_png, &badges, &font, quality, position, badge_style, label_style, badge_appearance, badge_direction, target_width, badge_scale, badge_size, blur)
     })
     .await
     .map_err(|e| AppError::Other(e.to_string()))??;

@@ -130,3 +130,23 @@ Fork (loukdekker.nl): when the server sets `BACKDROP_MAX_WIDTH`, backdrop sizes 
 | `very-large` / `verylarge` | 1920 × 1080 |
 
 `small` is only valid for backdrops and episodes — requesting it for posters or logos returns `400 Bad Request`. `verylarge` is accepted as an alias for `very-large` for RPDB compatibility.
+
+## Admin previews on real artwork (fork only, loukdekker.nl)
+
+The admin preview endpoints (`GET /api/admin/preview/{poster|logo|backdrop|episode}`, admin login
+required) draw sample rating badges on a built-in gradient and take the same render parameters as the
+image routes (`badge_background`, `badge_style`, `label_style`, `badge_size`, `badge_shape`, `position`,
+`badge_direction`, `ratings_limit`, `ratings_order`, `ratings_exclude`, `imageSize`, …). The fork adds:
+
+- `?art=movie-<tmdb id>` or `?art=series-<tmdb id>` (`tv-<id>` also works): draw the badges on the
+  title's real TMDB image for that kind, chosen like the image routes do on the TMDB side (English
+  poster/logo, language-free backdrop). No rating service is called: the badges are the preview samples.
+- Episode previews with `art` also need `&season=<n>&episode=<n>` and a series id; they use the
+  episode's still.
+- Without `art` the previews are exactly as before. With it, the preview cache key carries an
+  `.art<m|s><id>` token (episodes `…s<season>e<episode>`). `imageSize` works as usual, e.g.
+  `imageSize=medium` for a 1920 px backdrop.
+- Errors are JSON `{"error": …}`: 400 for a malformed `art`, 404 when TMDB has no such title or image,
+  502 when TMDB fails, 403 when `art` is used on the self-service `/api/key/me/preview/*` routes.
+
+Example: `/api/admin/preview/backdrop?art=movie-603&badge_background=a&imageSize=medium`.

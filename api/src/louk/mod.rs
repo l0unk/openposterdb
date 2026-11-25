@@ -4,3 +4,4 @@
 pub mod backdrop_cap;
 pub mod badge_looks;
 pub mod config;
+pub mod preview_art;
