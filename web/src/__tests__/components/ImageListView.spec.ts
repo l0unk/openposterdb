@@ -85,6 +85,11 @@ function mountView(mocks: ReturnType<typeof makeMocks>, kind: 'poster' | 'logo' 
         Loader2: { template: '<span />' },
         Eye: { template: '<span />' },
         Trash2: { template: '<span />' },
+        ImageUp: { template: '<span />' },
+        OverridePicker: {
+          template: '<div v-if="open" data-testid="picker-stub">{{ kind }} {{ idType }}/{{ idValue }}</div>',
+          props: ['open', 'kind', 'idType', 'idValue'],
+        },
       },
     },
   })
@@ -340,5 +345,31 @@ describe('ImageListView', () => {
     expect(wrapper.text()).toContain('boom')
     // Dialog stays open (the confirm button is still present).
     expect(wrapper.findAll('button').filter((b) => b.text().trim() === 'Clear posters').length).toBe(2)
+  })
+
+  it('opens the override picker for the row\'s title id (variant suffix stripped)', async () => {
+    const mocks = makeMocks()
+    mocks.listFn.mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          items: [{ cache_key: 'imdb/tt0111161_t_de@imc', release_date: null, created_at: 1710000000, updated_at: 1710000000 }],
+          total: 1,
+          page: 1,
+          page_size: 50,
+        }),
+    })
+    const wrapper = mountView(mocks)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="picker-stub"]').exists()).toBe(false)
+
+    const button = wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'Override poster')
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="picker-stub"]').text()).toBe('poster imdb/tt0111161')
+    // Opening the picker does not open the row preview.
+    expect(mocks.imageFn).not.toHaveBeenCalled()
   })
 })
