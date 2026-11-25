@@ -65,6 +65,9 @@ pub struct AppState {
     /// In-memory cache for `available_ratings` SQLite lookups.
     /// Avoids hitting the database on every image request when the entry is already known.
     pub available_ratings_cache: moka::future::Cache<String, Option<String>>,
+    /// Per-title art overrides (admin-set), mirrored in memory so the render
+    /// path never queries the DB for them.
+    pub overrides: Arc<services::overrides::store::OverrideStore>,
 }
 
 impl AppState {
@@ -195,6 +198,23 @@ pub const SCHEMA_SQL: &[&str] = &[
         logo_label_style       TEXT NOT NULL DEFAULT 'i',
         backdrop_label_style   TEXT NOT NULL DEFAULT 'i',
         poster_badge_direction TEXT NOT NULL DEFAULT 'd'
+    )",
+    // Per-title art overrides, keyed on the resolved title (never the
+    // requested id). season/episode are -1 except for episode stills; lang ''
+    // applies to every request language.
+    "CREATE TABLE IF NOT EXISTS image_overrides (
+        media_type TEXT NOT NULL,
+        tmdb_id    INTEGER NOT NULL,
+        kind       TEXT NOT NULL,
+        season     INTEGER NOT NULL DEFAULT -1,
+        episode    INTEGER NOT NULL DEFAULT -1,
+        lang       TEXT NOT NULL DEFAULT '',
+        source     TEXT NOT NULL,
+        value      TEXT NOT NULL DEFAULT '',
+        fanart_id  TEXT,
+        no_badges  INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (media_type, tmdb_id, kind, season, episode, lang)
     )",
 ];
 
